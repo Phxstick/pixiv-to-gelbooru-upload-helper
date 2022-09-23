@@ -141,7 +141,11 @@ async function handleUploadStatusUpdate(statusUpdate: StatusUpdate) {
     for (const pixivId in pixivIdToGelbooruIds) {
         const gelbooruIds = pixivIdToGelbooruIds[pixivId]
         if (pixivId in storedPixivIdToGelbooruIds) {
-            storedPixivIdToGelbooruIds[pixivId].push(...gelbooruIds)
+            for (const gelbooruId of gelbooruIds) {
+                if (!storedPixivIdToGelbooruIds[pixivId].includes(gelbooruId)) {
+                    storedPixivIdToGelbooruIds[pixivId].push(gelbooruId)
+                }
+            }
         } else {
             storedPixivIdToGelbooruIds[pixivId] = [...gelbooruIds]
         }
