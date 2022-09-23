@@ -1,0 +1,29 @@
+.artist-links-container {
+    &.hovering {
+        [data-gtm-value] {
+            text-shadow: 0 0 2px white, 0 0 2px white, 0 0 2px white, 0 0 5px crimson, 0 0 8px crimson;
+        }
+        div[role="img"] {
+            box-shadow: 0 0 8px 3px rgba(crimson, 0.7);
+        }
+        cursor: pointer;
+    }
+}
+.artist-check-overlay {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1;
+    background-color: rgba(0, 0, 0, 0.7);
+    font-size: 2.6rem;
+    line-height: 3.4rem;
+    color: #d0d0d0;
+    text-shadow: 0 0 5px black;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    user-select: none;
+}

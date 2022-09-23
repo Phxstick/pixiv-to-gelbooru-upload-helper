@@ -1,0 +1,141 @@
+.artwork-overlay {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    cursor: default;
+
+    .image-filter {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        opacity: 0;
+
+        &.upload-prepared {
+            background-color: forestgreen;
+        }
+        &.already-uploaded {
+            background-color: #006ffa;
+        }
+        &.check-failed {
+            background-color: crimson;
+        }
+    }
+
+    .status-container {
+        position: absolute;
+
+        .gelbooru-ids {
+            // Same height and margin as progress bar
+            margin-top: 20px;
+            height: 40px;
+            text-align: center;
+            display: none;
+
+            .gelbooru-link {
+                padding: 22px 18px;
+                border-radius: 7px;
+                background-color: rgba(72, 153, 255, 0.7);
+                color: #eee;
+                box-shadow: 0 0 5px 2px white;
+                text-shadow: 0 0 2px midnightblue, 0 0 2px midnightblue,
+                            0 0 2px midnightblue, 0 0 2px midnightblue;
+                font-weight: normal;
+                font-size: 1.4rem;
+                opacity: 0.85;
+                margin-right: 7px;
+                
+                &:hover {
+                    background-color: rgba(72, 153, 255, 0.8);
+                    color: #fff;
+                    opacity: 1;
+                }
+            }
+        }
+    }
+
+    .status-message {
+        font-size: 2.5rem;
+        line-height: 2.5rem !important;
+        text-align: center;
+        text-shadow: 0 0 5px white, 0 0 5px white, 0 0 5px white, 0 0 5px white;
+        pointer-events: none;
+        transition: color 0.2s;
+
+        &.upload-prepared {
+            color: forestgreen;
+        }
+        &.already-uploaded {
+            color: #006ffa;
+        }
+        &.check-failed {
+            color: crimson;
+        }
+    }
+
+    .progress-bar {
+        margin-top: 20px;
+        margin-left: auto;
+        margin-right: auto;
+        width: 200px;
+        background-color: lightgrey;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 0 10px 5px white;
+        opacity: 0;
+        pointer-events: none;
+
+        .progress-bar-inner {
+            height: 40px;
+            background-color: #0087e0;
+            width: 0px;
+        }
+    }
+
+    %light-button {
+        // Same height and margin as progress bar
+        margin-top: 20px;
+        height: 40px;
+        margin-left: auto;
+        margin-right: auto;
+        box-shadow: 0 0 8px 0px white;
+        font-size: 1.8rem;
+        padding-bottom: 4px;  // To make text look more centered
+        border-radius: 5px;
+        cursor: pointer;
+        border-width: 1px;
+        border-style: solid;
+
+        &:focus-visible {
+            outline: none;
+        }
+    }
+
+    .retry-button {
+        @extend %light-button;
+        border-color: darkred;
+        background-color: rgba(255,255,255,0.4);
+        color: maroon;
+
+        &:hover {
+            box-shadow: 0 0 8px 3px white;
+            background-color: rgba(255,255,255,0.6);
+        }
+    }
+    .upload-page-button {
+        @extend %light-button;
+        border-color: rgba(forestgreen, 0.7);
+        background-color: rgba(255,255,255,0.28);
+        color: seagreen;
+        text-shadow: 0 0 3px white, 0 0 1px white;
+
+        &:hover {
+            box-shadow: 0 0 10px 2px white;
+            background-color: rgba(255,255,255,0.48);
+        }
+    }
+}

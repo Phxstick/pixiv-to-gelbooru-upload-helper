@@ -1,0 +1,36 @@
+{
+    "manifest_version": 3,
+    "name": "Pixiv to Gelbooru upload helper",
+    "version": "1.0.0",
+
+    "description": "Enhances Pixiv to facilitate uploading pictures to Gelbooru.",
+
+    "permissions": [
+        "storage",
+        "unlimitedStorage",
+        "declarativeNetRequestWithHostAccess"
+    ],
+
+    "host_permissions": [
+        "https://www.pixiv.net/",
+        "https://i.pximg.net/"
+    ],
+
+    "background": {
+        "service_worker": "background.js"
+    },
+
+    "content_scripts": [
+        {
+            "matches": ["https://www.pixiv.net/*"],
+            "js": ["pixivScript.js"]
+        }
+    ],
+
+    "icons": {
+        "48": "icons/icon-48.png",
+        "128": "icons/icon-128.png"
+    },
+
+    "options_page": "settings.html"
+}
