@@ -4,7 +4,7 @@ import { PixivTags } from "./types"
 import { createGelbooruLink, E } from "./utility"
 import "./artwork-overlay.scss"
 
-const gelbooruUploadExtension = "hnimcpiehhbajibceplcnnjlagoipeda"
+const gelbooruUploadExtension = "ilemnfmnoanhiapnbdjolbojmpkbhbnp"
 
 export default class ArtworkOverlay {
     private readonly img: HTMLImageElement

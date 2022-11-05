@@ -8,7 +8,7 @@ interface GelbooruPost {
     source: string
 }
 
-const GELBOORU_UPLOAD_EXTENSION = "hnimcpiehhbajibceplcnnjlagoipeda"
+const GELBOORU_UPLOAD_EXTENSION = "ilemnfmnoanhiapnbdjolbojmpkbhbnp"
 const ID_MAP_KEY = "pixivIdToGelbooruIds"
 const PIXIV_TABS_KEY = "pixivTabs"
 

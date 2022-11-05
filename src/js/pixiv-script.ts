@@ -12,6 +12,7 @@ const thumbnailStatus = new ThumbnailStatus()
 const artistCheck =  new ArtistCheck()
 
 const currentSettings = SettingsManager.getDefaultValues();
+const settingsLoaded = browser.runtime.sendMessage({ type: "get-settings" }).then(updateSettings)
 
 let stickyParent: HTMLElement
 const stickyParentObserver = new MutationObserver(() => {
@@ -21,11 +22,12 @@ const stickyParentObserver = new MutationObserver(() => {
     }
 })
 
-function applySettings(changedSettings: Set<keyof Settings>) {
+function applySettings(changedSettings?: Set<keyof Settings>) {
     const mainElement = document.querySelector("main")
-    const listElements = [...document.querySelectorAll("aside ul")] as HTMLElement[]
-    const relatedPicsContainer = listElements[listElements.length - 1]
-    if (changedSettings.has("hideRelatedPixivPics")) {
+    const hasChanged = (key: keyof Settings) => changedSettings ? changedSettings.has(key) : currentSettings[key]
+    if (hasChanged("hideRelatedPixivPics")) {
+        const listElements = [...root.querySelectorAll("aside ul")] as HTMLElement[]
+        const relatedPicsContainer = listElements[listElements.length - 1]
         if (relatedPicsContainer) {
             const asideElement = relatedPicsContainer.closest("aside")
             if (asideElement) {
@@ -36,7 +38,7 @@ function applySettings(changedSettings: Set<keyof Settings>) {
             }
         }
     }
-    if (changedSettings.has("hidePixivHeader")) {
+    if (hasChanged("hidePixivHeader")) {
         if (root.children[1]) {
             const header = root.children[1].querySelector(":scope > div > div > div[style]") as HTMLElement | null
             if (header) {
@@ -57,12 +59,12 @@ function applySettings(changedSettings: Set<keyof Settings>) {
             }
         }
     }
-    if (changedSettings.has("showThumbnailStatus")) {
+    if (hasChanged("showThumbnailStatus")) {
         thumbnailStatus.toggle(currentSettings.showThumbnailStatus)
     }
 }
 
-async function updateSettings(settings: Settings) {
+async function updateSettings(settings: Settings): Promise<Set<keyof Settings>> {
     const changedSettings = new Set<keyof Settings>()
     for (const setting in settings) {
         const settingKey = setting as keyof Settings
@@ -71,7 +73,7 @@ async function updateSettings(settings: Settings) {
             changedSettings.add(settingKey)
         }
     }
-    if (changedSettings.size) applySettings(changedSettings)
+    return changedSettings
 }
 
 function gatherPixivTags(): PixivTags {
@@ -98,12 +100,21 @@ document.addEventListener("click", async (event) => {
     if (!event.ctrlKey) return
     const target = event.target as HTMLElement
     if (target.tagName !== "IMG") return
-    const img = target as HTMLImageElement
+    let img = target as HTMLImageElement
 
     // Find URL of the original version of the clicked image
     let url: string
     if (img.src.includes("img-original")) {
         url = img.src
+        // Close the view with the original-size image
+        img.click()
+        // Add overlay to the resized preview instead (NOTE: the preview and original may have
+        // different file types, e.g. JPG and PNG, so use a prefix-search to find preview img)
+        const previewUrl = url.replace("img-original", "img-master")
+            .replace(/_p(\d+)\./, "_p$1_master1200.").slice(0, -4)
+        const previewImage = document.querySelector(`img[src^='${previewUrl}']`)
+        if (previewImage === null) return
+        img = previewImage as HTMLImageElement
     } else if (img.parentElement) {
         const href = img.parentElement.getAttribute("href")
         if (href !== null && href.includes("img-original")) {
@@ -159,7 +170,7 @@ const listingWrapperObserver = new MutationObserver(mutationList => {
                 const listing = getListing(section)
                 if (listing === null) continue
                 thumbnailStatus.clear()
-                handleListingPage(listing)
+                thumbnailStatus.manage([{ container: listing, size: "large" }])
             }
         }
     }
@@ -174,7 +185,7 @@ function getListing(section: HTMLElement) {
 }
 
 function handleArtworkPage(navElements: HTMLElement[]) {
-    browser.runtime.sendMessage({ type: "get-settings" }).then(updateSettings)
+    settingsLoaded.then(() => applySettings())
     ArtworkOverlay.clear()
 
     const adjacentPicsContainer = navElements[1] as HTMLElement
@@ -201,11 +212,13 @@ function handleArtworkPage(navElements: HTMLElement[]) {
 }
 
 function handleListingPage(listing: HTMLElement) {
-    const listingWrapper = listing.closest("section")!.parentElement!.parentElement!.parentElement!
+    const listingWrapper = listing.closest("section")!.parentElement!.parentElement!
     listingWrapperObserver.disconnect()
+    // Wrapper can be different on some pages, observe all possible candidates
     listingWrapperObserver.observe(listingWrapper, { childList: true })
+    listingWrapperObserver.observe(listingWrapper.parentElement!, { childList: true })
 
-    browser.runtime.sendMessage({ type: "get-settings" }).then(updateSettings)
+    settingsLoaded.then(() => applySettings())
     thumbnailStatus.manage([{ container: listing, size: "large" }])
 
     // Click artist name or profile picture to check artist posts
@@ -288,7 +301,9 @@ browser.runtime.onMessage.addListener((message, sender) => {
 
     else if (message.type === "settings-changed") {
         if (!message.args) return
-        updateSettings(message.args.settings)
+        updateSettings(message.args.settings).then(changedSettings => {
+            if (changedSettings.size) applySettings(changedSettings)
+        })
     }
 })
 

@@ -60,6 +60,20 @@ export default class ThumbnailStatus {
             initialLinks.push(...container.children)
             const panel = new ThumbnailPanel(this.pixivIdToGelbooruIds, size)
             panel.attachTo(container)
+            // Sometimes the container gets replaced with a new one,
+            // use a childList observer on the parent to catch those cases
+            const containerWrapperObserver = new MutationObserver((mutationList) => {
+                for (const mutation of mutationList) {
+                    for (const node of mutation.addedNodes) {
+                        const element = node as HTMLElement
+                        if (element.tagName != "UL") continue
+                        this.linkContainerObserver.observe(element, { childList: true })
+                        panel.attachTo(element)
+                        this.handlePixivLinks(element.children)
+                    }
+                }
+            })
+            containerWrapperObserver.observe(container.parentElement!, { childList: true })
         }
         this.handlePixivLinks(initialLinks)
     }
