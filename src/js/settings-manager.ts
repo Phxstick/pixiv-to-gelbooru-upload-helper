@@ -19,7 +19,8 @@ class SettingsManager {
         return {
             showThumbnailStatus: {
                 type: "boolean",
-                text: "Mark thumbnails according to whether the artwork has been uploaded to Gelbooru"
+                text: "Mark thumbnails according to whether the artwork has been uploaded to an image host",
+                details: "If a Pixiv post contains multiple images, it's enough for one of them to be uploaded already"
             },
             hideRelatedPixivPics: {
                 type: "boolean",

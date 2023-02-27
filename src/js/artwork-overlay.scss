@@ -13,7 +13,6 @@
         position: absolute;
         top: 0;
         bottom: 0;
-        opacity: 0;
 
         &.upload-prepared {
             background-color: forestgreen;
@@ -26,17 +25,64 @@
         }
     }
 
+    .select-host-wrapper {
+        position: absolute;
+        padding: 25px;
+        border-radius: 12px;
+        background-color: rgba(0,0,0,0.3);
+        box-shadow: 0 0 5px rgba(0,0,0,0.3);
+
+
+        .select-host-message {
+            // color: #333;
+            // text-shadow: 0 0 5px white, 0 0 5px white, 0 0 5px white, 0 0 5px white;
+            color: white;
+            text-shadow: 0 0 4px black, 0 0 10px dimgrey, 0 0 10px dimgrey;
+            font-size: 2rem;
+            line-height: 2rem;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .host-buttons {
+            font-size: 2rem;
+            display: flex;
+            flex-direction: column;
+
+            .host-button {
+                color: #333;
+                min-width: 180px;
+                cursor: pointer;
+                padding-top: 5px;
+                padding-bottom: 3px;
+                border: 1px solid dimgray;
+                border-radius: 5px;
+                text-shadow: 0 0 5px white, 0 0 5px white, 0 0 5px white;
+                box-shadow: 0 0 10px dimgray;
+                background-color: rgba(230, 230, 230, 0.7);
+
+                &:not(:last-child) {
+                    margin-bottom: 12px;
+                }
+                &:hover {
+                  background-color: rgba(230, 230, 230, 0.85);
+                  box-shadow: 0 0px 10px #222;
+                  color: #111;
+                }
+            }
+        }
+    }
+
     .status-container {
         position: absolute;
 
-        .gelbooru-ids {
+        .post-ids {
             // Same height and margin as progress bar
             margin-top: 20px;
             height: 40px;
             text-align: center;
             display: none;
 
-            .gelbooru-link {
+            .post-link {
                 padding: 22px 18px;
                 border-radius: 7px;
                 background-color: rgba(72, 153, 255, 0.7);
@@ -86,7 +132,6 @@
         border-radius: 10px;
         overflow: hidden;
         box-shadow: 0 0 10px 5px white;
-        opacity: 0;
         pointer-events: none;
 
         .progress-bar-inner {

@@ -1,3 +1,5 @@
+import browser from "webextension-polyfill";
+import { HostName } from "./types"
 
 export function E(type: string, props?: any, children?: (HTMLElement | string)[] | string): HTMLElement {
     const element = document.createElement(type);
@@ -92,10 +94,24 @@ export function createInput(props: InputProps) {
     }
 }
 
-export function createGelbooruLink(container: HTMLElement, gelbooruId: string, text?: string): HTMLElement {
-    if (!text) text = (container.children.length + 1).toString()
-    const href = "https://gelbooru.com/index.php?page=post&s=view&id=" + gelbooruId
-    const link = E("a", { class: "gelbooru-link", target: "_blank", href }, text)
+export function createPostLink(
+    container: HTMLElement,
+    postId: string,
+    host: HostName,
+    text?: string
+): HTMLElement {
+    const iconUrl = browser.runtime.getURL(`icons/${host}-favicon.png`)
+    const content = text ? text : [E("img", { src: iconUrl })]
+    // if (!text) text = (container.children.length + 1).toString()
+    let href: string
+    if (host === HostName.Gelbooru) {
+        href = "https://gelbooru.com/index.php?page=post&s=view&id=" + postId
+    } else if (host === HostName.Danbooru) {
+        href = "https://danbooru.donmai.us/posts/" + postId
+    } else {
+        throw new Error(`Unknown image host ${host}.`)
+    }
+    const link = E("a", { class: "post-link", target: "_blank", href }, content)
     container.appendChild(link)
     return link
 }

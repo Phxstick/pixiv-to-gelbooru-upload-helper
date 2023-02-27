@@ -1,72 +1,88 @@
 import SettingsManager from "js/settings-manager";
 import browser from "webextension-polyfill";
+import { HostName, StatusMap } from "js/types";
 
-type PixivIdToGelbooruIds = { [key in string]: string[] }
+type PixivIdToPostIds = { [key in string]: string[] }
 
-interface GelbooruPost {
+interface Post {
     id: string | number
     source: string
 }
 
-const GELBOORU_UPLOAD_EXTENSION = "ilemnfmnoanhiapnbdjolbojmpkbhbnp"
-const ID_MAP_KEY = "pixivIdToGelbooruIds"
+// const UPLOAD_EXTENSION = "ilemnfmnoanhiapnbdjolbojmpkbhbnp"
+const UPLOAD_EXTENSION = "akdimecgpicfibabbjalmkaphplbonba"
 const PIXIV_TABS_KEY = "pixivTabs"
+const StatusMapKeys: { [key in HostName]: string } = {
+    [HostName.Gelbooru]: "pixivIdToGelbooruIds",
+    [HostName.Danbooru]: "pixivIdToDanbooruIds"
+}
+const allHosts = Object.values(HostName) as HostName[]
 
-async function getGelbooruPostsForPixivIds(pixivIds: string[]): Promise<PixivIdToGelbooruIds> {
-    const localData = await browser.storage.local.get({ [ID_MAP_KEY]: {} })
-    const pixivIdToGelbooruIds = localData[ID_MAP_KEY] as PixivIdToGelbooruIds
-    const gelbooruIds: PixivIdToGelbooruIds = {}
+async function getPostsForPixivIds(pixivIds: string[], hosts?: HostName[]): Promise<StatusMap> {
+    if (!hosts) hosts = allHosts
+    const storageKeys = hosts.map(host => StatusMapKeys[host])
+    const localData = await browser.storage.local.get(storageKeys)
+    const statusMap: StatusMap = {}
     for (const pixivId of pixivIds) {
-        if (pixivId in pixivIdToGelbooruIds) {
-            gelbooruIds[pixivId] = pixivIdToGelbooruIds[pixivId]
+        statusMap[pixivId] = {}
+        for (let i = 0; i < hosts.length; ++i) {
+            if (!localData[storageKeys[i]]) continue
+            const pixivIdToPostIds = localData[storageKeys[i]] as PixivIdToPostIds
+            if (pixivId in pixivIdToPostIds) {
+                statusMap[pixivId][hosts[i]] = pixivIdToPostIds[pixivId]
+            }
         }
     }
-    return gelbooruIds
+    return statusMap
 }
 
-async function getGelbooruPostsForArtistTag(artistTag: string): Promise<PixivIdToGelbooruIds> {
-    let response: { error?: string, posts: GelbooruPost[] }
+function getPixivIdFromUrl(urlString: string): string {
+    if (!urlString) return ""
+    const url = new URL(urlString)
+    if (!url) return ""
+    if (url.host === "www.pixiv.net") {
+        if (url.searchParams.has("illust_id")) {
+            return url.searchParams.get("illust_id")!
+        }
+        const pathParts = url.pathname.split("/")
+        if (pathParts.length === 0) return "" 
+        const lastPart = pathParts[pathParts.length - 1]
+        if (!isNaN(lastPart as any)) return lastPart
+    } else if (url.host === "i.pximg.net") {
+        const match = url.pathname.match(/(\d+)_p\d+/)
+        return match !== null ? match[1] : ""
+    }
+    return ""
+}
+
+async function getPostsForArtistTag(artistTag: string, host: HostName): Promise<PixivIdToPostIds> {
+    let response: { error?: string, posts: Post[] }
     try {
-        response = await browser.runtime.sendMessage(GELBOORU_UPLOAD_EXTENSION, {
-            type: "query-gelbooru",
-            args: { tags: [artistTag] }
+        response = await browser.runtime.sendMessage(UPLOAD_EXTENSION, {
+            type: "query-host",
+            args: { tags: [artistTag], host }
         })
     } catch (error) {
-        throw new Error("Gelbooru query failed.")
+        throw new Error("Query failed.")
     }
     if (response.error) throw new Error(response.error)
-    const pixivIdToGelbooruIds: PixivIdToGelbooruIds = {}
+    const pixivIdToPostIds: PixivIdToPostIds = {}
     for (const post of response.posts) {
-        let pixivId = ""
-        try {
-            const url = new URL(post.source)
-            if (!url || url.host !== "www.pixiv.net") continue
-            if (url.searchParams.has("illust_id")) {
-                pixivId = url.searchParams.get("illust_id")!
-            } else {
-                const pathParts = url.pathname.split("/")
-                const lastPart = pathParts[pathParts.length - 1]
-                if (!isNaN(lastPart as any)) {
-                    pixivId = lastPart
-                }
-            }
-        } catch (error) {
-            // console.log("ERROR parsing source URL:", post.source)
-        }
+        const pixivId = getPixivIdFromUrl(post.source)
         if (!pixivId) continue
-        const gelbooruId = post.id.toString()
-        if (pixivId in pixivIdToGelbooruIds) {
-            pixivIdToGelbooruIds[pixivId].push(gelbooruId)
+        const postId = post.id.toString()
+        if (pixivId in pixivIdToPostIds) {
+            pixivIdToPostIds[pixivId].push(postId)
         } else {
-            pixivIdToGelbooruIds[pixivId] = [gelbooruId]
+            pixivIdToPostIds[pixivId] = [postId]
         }
     }
-    return pixivIdToGelbooruIds
+    return pixivIdToPostIds
 }
 
 async function getArtistTags(url: string): Promise<string[]> {
     let response: { error?: string, html: string }
-    response = await browser.runtime.sendMessage(GELBOORU_UPLOAD_EXTENSION, {
+    response = await browser.runtime.sendMessage(UPLOAD_EXTENSION, {
         type: "query-artist-database",
         args: { url }
     })
@@ -78,40 +94,41 @@ async function getArtistTags(url: string): Promise<string[]> {
     return [...response.html.matchAll(regex)].map(match => match[1].trim())
 }
 
-async function handleArtistStatusCheck(url: string) {
+async function handleArtistStatusCheck(url: string, host: HostName) {
     const artistTags = await getArtistTags(url)
     let numPixivIds = 0
-    let numGelbooruPosts = 0
+    let numPosts = 0
     if (artistTags.length === 0) {
-        return { numPixivIds, numGelbooruPosts }
+        return { numPixivIds, numPosts }
     }
-    const pixivIdToGelbooruIds: PixivIdToGelbooruIds = {}
+    const statusMap: StatusMap = {}
     for (const artistTag of artistTags) {
-        const artistStatusMap = await getGelbooruPostsForArtistTag(artistTag)
+        const artistStatusMap = await getPostsForArtistTag(artistTag, host)
         for (const pixivId in artistStatusMap) {
-            const gelbooruIds = artistStatusMap[pixivId]
-            if (!(pixivId in pixivIdToGelbooruIds)) {
-                pixivIdToGelbooruIds[pixivId] = gelbooruIds
-                numGelbooruPosts += gelbooruIds.length
+            const postIds = artistStatusMap[pixivId]
+            if (!(pixivId in statusMap)) {
+                statusMap[pixivId] = { [host]: postIds }
+                numPosts += postIds.length
                 numPixivIds++
             } else {
-                for (const gelbooruId of gelbooruIds) {
-                    if (!pixivIdToGelbooruIds[pixivId].includes(gelbooruId)) {
-                        pixivIdToGelbooruIds[pixivId].push(gelbooruId)
-                        numGelbooruPosts++
+                for (const postId of postIds) {
+                    if (!statusMap[pixivId][host]!.includes(postId)) {
+                        statusMap[pixivId][host]!.push(postId)
+                        numPosts++
                     }
                 }
             }
         }
     }
-    handleUploadStatusUpdate({ pixivIdToGelbooruIds })
-    return { numPixivIds, numGelbooruPosts }
+    handleUploadStatusUpdate({ pixivIdToPostIds: statusMap })
+    return { numPixivIds, numPosts }
 }
 
 interface StatusUpdate {
-    pixivIdToGelbooruIds: PixivIdToGelbooruIds
-    filenameToGelbooruIds?: { [key in string]: string[] }
+    pixivIdToPostIds: StatusMap
+    filenameToPostIds?: StatusMap
 }
+
 async function handleUploadStatusUpdate(statusUpdate: StatusUpdate) {
     // Notify all opened Pixiv tabs of this status update
     const sessionData = await browser.storage.session.get({ [PIXIV_TABS_KEY]: [] })
@@ -135,22 +152,35 @@ async function handleUploadStatusUpdate(statusUpdate: StatusUpdate) {
     })
 
     // Add new data to mapping in local storage
-    const localData = await browser.storage.local.get({ [ID_MAP_KEY]: {} })
-    const storedPixivIdToGelbooruIds = localData[ID_MAP_KEY] as PixivIdToGelbooruIds
-    const { pixivIdToGelbooruIds } = statusUpdate
-    for (const pixivId in pixivIdToGelbooruIds) {
-        const gelbooruIds = pixivIdToGelbooruIds[pixivId]
-        if (pixivId in storedPixivIdToGelbooruIds) {
-            for (const gelbooruId of gelbooruIds) {
-                if (!storedPixivIdToGelbooruIds[pixivId].includes(gelbooruId)) {
-                    storedPixivIdToGelbooruIds[pixivId].push(gelbooruId)
-                }
+    const storedMaps: { [key in HostName]?: PixivIdToPostIds } = {}
+    const { pixivIdToPostIds } = statusUpdate
+    for (const pixivId in pixivIdToPostIds) {
+        for (const key in pixivIdToPostIds[pixivId]) {
+            const host = key as HostName
+            const postIds = pixivIdToPostIds[pixivId][host]!
+            if (!storedMaps[host]) {
+                const key = StatusMapKeys[host]
+                const localData = await browser.storage.local.get({ [key]: {} })
+                storedMaps[host] = localData[key] as PixivIdToPostIds
             }
-        } else {
-            storedPixivIdToGelbooruIds[pixivId] = [...gelbooruIds]
+            const storedMap = storedMaps[host]!
+            if (pixivId in storedMap) {
+                for (const postId of postIds) {
+                    if (!storedMap[pixivId].includes(postId)) {
+                        storedMap[pixivId].push(postId)
+                    }
+                }
+            } else {
+                storedMap[pixivId] = [...postIds]
+            }
         }
     }
-    await browser.storage.local.set({ [ID_MAP_KEY]: storedPixivIdToGelbooruIds })
+    const storageUpdate: any = {}
+    for (const key in storedMaps) {
+        const host = key as HostName
+        storageUpdate[StatusMapKeys[host]] = storedMaps[host]!
+    }
+    await browser.storage.local.set(storageUpdate)
 }
 
 async function handleImageDownload(url: string, port: browser.Runtime.Port) {
@@ -192,12 +222,15 @@ browser.runtime.onMessage.addListener(async (request, sender) => {
     if (sender.id !== browser.runtime.id) return
     if (!request.type) return
     const args = request.args || {}
-    if (request.type === "handle-artist-url") {
-        return handleArtistStatusCheck(args.url)
+    if (request.type === "prepare-upload" || request.type === "focus-tab") {
+        // Just forward messages with these types to the upload extension
+        return browser.runtime.sendMessage(UPLOAD_EXTENSION, request)
+    } else if (request.type === "find-posts-by-artist") {
+        return handleArtistStatusCheck(args.url, args.host)
     } else if (request.type === "pixiv-status-update") {
         handleUploadStatusUpdate(args as StatusUpdate)
-    } else if (request.type === "get-gelbooru-status") {
-        return getGelbooruPostsForPixivIds(args.pixivIds)
+    } else if (request.type === "get-host-status") {
+        return getPostsForPixivIds(args.pixivIds, args.host)
     } else if (request.type === "get-settings") {
         return SettingsManager.getAll()
     } else if (request.type === "settings-changed") {
@@ -237,9 +270,9 @@ browser.runtime.onInstalled.addListener(async () => {
     })
 })
 
-// Receive push updates from Gelbooru upload extension
+// Receive push updates from the upload extension
 browser.runtime.onMessageExternal.addListener((request, sender) => {
-    if (!sender.id || sender.id !== GELBOORU_UPLOAD_EXTENSION) return
+    if (!sender.id || sender.id !== UPLOAD_EXTENSION) return
     if (!request && !request.type) return
     const args = request.args || {}
     if (request.type === "pixiv-status-update") {

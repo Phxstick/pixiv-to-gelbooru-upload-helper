@@ -1,13 +1,14 @@
 import browser from "webextension-polyfill";
 import anime from "animejs"
-import { PixivTags } from "./types"
-import { createGelbooruLink, E } from "./utility"
+import { PixivTags, HostName, UploadStatus } from "./types"
+import { createPostLink, E } from "./utility"
 import "./artwork-overlay.scss"
-
-const gelbooruUploadExtension = "ilemnfmnoanhiapnbdjolbojmpkbhbnp"
 
 export default class ArtworkOverlay {
     private readonly img: HTMLImageElement
+    private readonly url: string
+    private readonly pixivTags: PixivTags
+    private selectedHost: HostName | undefined
 
     // Overlay elements
     private readonly imageFilter = E("div", { class: "image-filter" })
@@ -16,16 +17,22 @@ export default class ArtworkOverlay {
     private readonly statusMessage = E("div", { class: "status-message" })
     private readonly uploadPageButton = E("button", { class: "upload-page-button" }, "Go to upload page")
     private readonly retryButton = E("button", { class: "retry-button" }, "Retry")
-    private readonly localGelbooruIdsContainer = E("div", { class: "gelbooru-ids" })
+    private readonly postLinksContainer = E("div", { class: "post-ids" })
+    private readonly hostButtonsContainer = E("div", { class: "host-buttons" })
+    private readonly selectHostWrapper = E("div", { class: "select-host-wrapper" }, [
+        E("div", { class: "select-host-message" }, "Select a site"),
+        this.hostButtonsContainer
+    ])
     private readonly statusContainer = E("div", { class: "status-container" }, [
         this.statusMessage,
         this.retryButton,
         this.progressBar,
         this.uploadPageButton,
-        this.localGelbooruIdsContainer
+        this.postLinksContainer
     ])
     private readonly overlayContainer = E("div", { class: "artwork-overlay" }, [
         this.imageFilter,
+        this.selectHostWrapper,
         this.statusContainer
     ])
 
@@ -54,8 +61,14 @@ export default class ArtworkOverlay {
         ArtworkOverlay.imageContainerObserver.disconnect()
     }
 
-    constructor(img: HTMLImageElement) {
+    constructor(img: HTMLImageElement, url: string, pixivTags: PixivTags) {
         this.img = img
+        this.url = url
+        this.pixivTags = pixivTags
+
+        this.reset()
+        this.overlayContainer.style.display = "none"
+        this.overlayContainer.style.opacity = "0"
 
         // Add overlay to image container
         const imgContainer = this.img.parentElement!
@@ -67,34 +80,24 @@ export default class ArtworkOverlay {
         // Click overlay to hide it
         this.overlayContainer.addEventListener("click", async (event) => {
             const target = event.target as HTMLElement
-            if (target.classList.contains("gelbooru-link")) return
-            if (target.classList.contains("retry-button")) return
-            if (target.classList.contains("upload-page-button")) return
+            if (target.tagName === "BUTTON" || target.tagName === "A") return
             event.stopPropagation()
             event.preventDefault()
             this.hide()
         }, { capture: true })
 
-        // Hide some elements initially
-        this.overlayContainer.style.display = "none"
-        this.overlayContainer.style.opacity = "0"
-        this.progressBar.style.opacity = "0"
-        this.retryButton.style.opacity = "0"
-        this.retryButton.style.display = "none"
-        this.uploadPageButton.style.opacity = "0"
-        this.uploadPageButton.style.display = "none"
-        this.localGelbooruIdsContainer.style.opacity = "0"
-
-        // Use capturing listener for clicking links, otherwise Pixiv's listener
-        // for zooming in on the image will fire instead
-        this.localGelbooruIdsContainer.addEventListener("click", (event) => {
-            if (!event.target) return
+        // Use capturing listener for clicking buttons/links, otherwise Pixiv's
+        // listener for zooming in on the image will fire instead
+        this.overlayContainer.addEventListener("click", (event) => {
             const target = event.target as HTMLElement
-            if (!target.classList.contains("gelbooru-link")) return
+            if (target.classList.contains("post-link")) {
+                const url = (target as HTMLAnchorElement).href
+                window.open(url, "_blank")?.focus()
+            } else if (target.classList.contains("host-button")) {
+                this.check(target.dataset.value as HostName)
+            } else return
             event.stopImmediatePropagation()
             event.preventDefault()
-            const url = (target as HTMLAnchorElement).href
-            window.open(url, "_blank")?.focus()
         }, { capture: true })
     }
 
@@ -115,14 +118,34 @@ export default class ArtworkOverlay {
     }
 
     // Update status of overlay for the image with given filename
-    static update(filename: string, gelbooruIds: string[]) {
-        if (!gelbooruIds.length) return
+    static update(filename: string, uploadStatus: UploadStatus) {
         const overlay = ArtworkOverlay.filenameToOverlay.get(filename)
-        if (!overlay) return
-        overlay.statusMessage.classList.remove("upload-prepared")
-        overlay.imageFilter.classList.remove("upload-prepared")
-        overlay.uploadPageButton.style.display = "none"
-        overlay.setUploaded(gelbooruIds)
+        if (overlay) overlay.handleStatusUpdate(uploadStatus)
+    }
+
+    async selectHost() {
+        if (this.hostButtonsContainer.children.length === 0) {
+            for (const host of Object.values(HostName)) {
+                const button = E("button", {
+                    class: "host-button",
+                    dataset: { value: host }
+                }, host[0].toUpperCase() + host.slice(1))
+                this.hostButtonsContainer.appendChild(button)
+            }
+        }
+        this.reset()
+        this.selectHostWrapper.style.display = "block"
+        this.selectHostWrapper.style.opacity = "1"
+    }
+
+    async check(host?: HostName) {
+        this.selectedHost = host
+        this.statusContainer.style.display = "block"
+        anime({ targets: this.selectHostWrapper,
+            opacity: 0, duration: 160, easing: "linear"
+        }).finished.then(() => { this.selectHostWrapper.style.display = "none" })
+        const dataUrl = await this.downloadImage(this.url)
+        this.conductCheck(dataUrl)
     }
 
     async downloadImage(url: string): Promise<string> {
@@ -175,22 +198,30 @@ export default class ArtworkOverlay {
         })
     }
 
-    async conductCheck(dataUrl: string, url: string, pixivTags: PixivTags) {
+    async conductCheck(dataUrl: string) {
         this.statusMessage.textContent = "Checking..."
 
-        // Send image to Gelbooru upload extension
-        let checkResult: { gelbooruIds?: string[], error?: string }
+        // Send image to upload extension
+        let checkResult: {
+            host?: HostName,
+            posts?: UploadStatus,
+            error?: string
+        }
         try {
-            checkResult = await browser.runtime.sendMessage(gelbooruUploadExtension, {
+            checkResult = await browser.runtime.sendMessage({
                 type: "prepare-upload",
                 data: {
                     file: dataUrl,
-                    url,
-                    pixivTags
+                    url: this.url,
+                    pixivTags: this.pixivTags,
+                    host: this.selectedHost
                 }
             })
         } catch (error) {
             checkResult = { error: `The extension "Improved Gelbooru upload"<br>must be enabled to conduct status checks!` }
+        }
+        if (checkResult.host) {
+            this.selectedHost = checkResult.host
         }
 
         // Click the retry-button to conduct a new check
@@ -203,12 +234,12 @@ export default class ArtworkOverlay {
             this.imageFilter.classList.remove("check-failed")
             anime({ targets: this.retryButton, opacity: 0, duration: 200, easing: "linear" })
             anime({ targets: this.imageFilter, opacity: 0, duration: 200, easing: "linear" })
-            this.conductCheck(dataUrl, url, pixivTags)
+            this.conductCheck(dataUrl)
         }
 
         // Display image check results received from upload extension
         this.imageFilter.style.width = `${this.img.offsetWidth}px`
-        if (!checkResult.gelbooruIds) {
+        if (!checkResult.posts) {
             this.statusMessage.textContent = "Check failed"
             if (checkResult.error) {
                 this.statusMessage.innerHTML += "<br>(" + checkResult.error + ")"
@@ -227,38 +258,72 @@ export default class ArtworkOverlay {
         }
         this.retryButton.style.display = "none"
         this.progressBar.style.display = "none"
-        const gelbooruIds = checkResult.gelbooruIds
-        if (gelbooruIds.length === 0) {
+        let numPosts = 0
+        for (const host in checkResult.posts) {
+            numPosts += checkResult.posts[host as HostName]!.length
+        }
+        if (numPosts === 0) {
             this.statusMessage.textContent = "Upload ready"
             this.statusMessage.classList.add("upload-prepared")
             this.imageFilter.classList.add("upload-prepared")
             this.uploadPageButton.style.display = "block"
-            const urlParts = url.split("/")
+            const urlParts = this.url.split("/")
             const filename = urlParts[urlParts.length - 1]
             ArtworkOverlay.filenameToOverlay.set(filename, this)
             this.uploadPageButton.addEventListener("click", (event) => {
                 event.stopImmediatePropagation()
                 event.preventDefault()
-                browser.runtime.sendMessage(gelbooruUploadExtension, {
+                browser.runtime.sendMessage({
                     type: "focus-tab",
-                    args: { filename }
+                    args: { filename, host: this.selectedHost }
                 })
             }, { capture: true })
             anime({ targets: this.uploadPageButton, opacity: 1, duration: 240, easing: "linear" })
             anime({ targets: this.imageFilter, opacity: 0.4, duration: 240, easing: "linear" })
         } else {
-            this.setUploaded(gelbooruIds)
+            this.handleStatusUpdate(checkResult.posts)
         }
     }
 
-    private setUploaded(gelbooruIds: string[]) {
+    private handleStatusUpdate(uploadStatus: UploadStatus) {
+        let numPosts = 0
+        for (const host in uploadStatus) {
+            numPosts += uploadStatus[host as HostName]!.length
+        }
+        if (numPosts === 0) return
+        this.statusMessage.classList.remove("upload-prepared")
         this.statusMessage.textContent = "Already uploaded"
         this.statusMessage.classList.add("already-uploaded")
+        this.imageFilter.classList.remove("upload-prepared")
         this.imageFilter.classList.add("already-uploaded")
-        const linkText = gelbooruIds.length === 1 ? "View post" : undefined
-        gelbooruIds.forEach(id => createGelbooruLink(this.localGelbooruIdsContainer, id, linkText))
-        this.localGelbooruIdsContainer.style.display = "block"
-        anime({ targets: this.localGelbooruIdsContainer, opacity: 1, duration: 240, easing: "linear" })
-        anime({ targets: this.imageFilter, opacity: 0.25, duration: 240, easing: "linear" })
+        this.uploadPageButton.style.display = "none"
+        const linkText = numPosts === 1 ? "View post" : undefined
+        for (const key in uploadStatus) {
+            const host = key as HostName
+            const postIds = uploadStatus[host]!
+            postIds.forEach(postId =>
+                createPostLink(this.postLinksContainer, postId, host, linkText))
+        }
+        this.postLinksContainer.style.display = "block"
+        anime({ targets: this.postLinksContainer,
+            opacity: 1, duration: 240, easing: "linear" })
+        anime({ targets: this.imageFilter,
+            opacity: 0.25, duration: 240, easing: "linear" })
+    }
+
+    private reset() {
+        this.imageFilter.style.opacity = "0"
+        this.progressBar.style.opacity = "0"
+        this.retryButton.style.opacity = "0"
+        this.retryButton.style.display = "none"
+        this.uploadPageButton.style.opacity = "0"
+        this.uploadPageButton.style.display = "none"
+        this.postLinksContainer.style.opacity = "0"
+        this.postLinksContainer.innerHTML = ""
+        this.selectHostWrapper.style.display = "none"
+        this.statusContainer.style.display = "none"
+        this.statusMessage.textContent = ""
+        this.statusMessage.classList.remove("upload-prepared")
+        this.statusMessage.classList.remove("already-uploaded")
     }
 }

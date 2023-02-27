@@ -1,6 +1,7 @@
 import browser from "webextension-polyfill";
 import { E } from "./utility";
 import anime from "animejs";
+import { HostName } from "./types";
 import "./artist-check.scss";
 
 interface ArtistContainer {
@@ -34,12 +35,12 @@ export default class ArtistCheck {
         for (const { element, artistUrl } of containers) {
             element.classList.add("artist-links-container")
 
-            // Ctrl + click element to search for Gelbooru uploads
+            // Ctrl + click element to search for posts
             element.addEventListener("click", (event) => {
                 if (!event.ctrlKey || !event.altKey) return
                 event.preventDefault()
                 event.stopImmediatePropagation()
-                this.findGelbooruPosts(artistUrl)
+                this.findPosts(artistUrl, HostName.Gelbooru)
             })
 
             // Highlight artist when hovingering while pressing the key combination
@@ -72,18 +73,19 @@ export default class ArtistCheck {
         }
     }
 
-    private async findGelbooruPosts(artistUrl: string) {
+    private async findPosts(artistUrl: string, host: HostName) {
         this.overlay.style.opacity = "0"
         this.overlay.innerHTML = "Searching for posts...";
         this.overlay.classList.remove("hidden")
         anime({ targets: this.overlay, opacity: 1, duration: 140, easing: "linear" })
         try {
             const { numPixivIds } = await browser.runtime.sendMessage({
-                type: "handle-artist-url",
-                args: { url: artistUrl }
+                type: "find-posts-by-artist",
+                args: { url: artistUrl, host }
             })
+            const hostString = host[0].toUpperCase() + host.slice(1)
             this.overlay.innerHTML =
-                `Found ${numPixivIds} Pixiv posts that have<br>been uploaded to Gelbooru!`
+                `Found ${numPixivIds} Pixiv posts that have<br>been uploaded to ${hostString}!`
         } catch (error) {
             this.overlay.innerHTML = `The extension "Improved Gelbooru upload"<br>must be enabled to conduct status checks!`
         }

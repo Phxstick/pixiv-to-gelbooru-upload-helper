@@ -1,11 +1,14 @@
 {
-  "name": "pixiv-gelbooru-status-checker",
-  "version": "1.0.0",
+  "name": "pixiv-to-gelbooru-upload-helper",
+  "version": "1.1.0",
   "description": "",
   "author": "Phxstick",
   "scripts": {
     "watch": "webpack --watch",
     "build": "webpack"
+  },
+  "engines": {
+      "node": ">=14.0.0 <15.0.0"
   },
   "dependencies": {
     "animejs": "^3.2.1",

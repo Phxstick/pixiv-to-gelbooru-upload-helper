@@ -3,7 +3,7 @@ import ThumbnailStatus from "./thumbnail-status";
 import ArtistCheck from "./artist-check";
 import ArtworkOverlay from "./artwork-overlay";
 import SettingsManager from "./settings-manager";
-import { PixivTags, Settings } from "./types";
+import { PixivTags, Settings, HostName } from "./types";
 import "./pixiv-script.scss"
 
 const root = document.getElementById("root") as HTMLElement
@@ -95,7 +95,7 @@ function gatherPixivTags(): PixivTags {
     return pixivTags
 }
 
-// Ctrl + click an image to add the original version of it to a Gelbooru upload tab 
+// Ctrl + click an image to add the original version of it to an upload tab 
 document.addEventListener("click", async (event) => {
     if (!event.ctrlKey) return
     const target = event.target as HTMLElement
@@ -128,19 +128,23 @@ document.addEventListener("click", async (event) => {
     event.stopPropagation()
     event.preventDefault()
 
-    // If this image was already handled before, just display existing overlay
+    // If this image was already handled before, display existing overlay
     const existingOverlay = ArtworkOverlay.getOverlay(img.parentElement!)
     if (existingOverlay !== undefined) {
         existingOverlay.show()
+        if (event.shiftKey) existingOverlay.selectHost()
         return
     }
 
     // Otherwise create new overlay, download and check image
-    const artworkOverlay = new ArtworkOverlay(img)
-    artworkOverlay.show()
-    const dataUrl = await artworkOverlay.downloadImage(url)
     const pixivTags = gatherPixivTags()
-    artworkOverlay.conductCheck(dataUrl, url, pixivTags)
+    const artworkOverlay = new ArtworkOverlay(img, url, pixivTags)
+    artworkOverlay.show()
+    if (event.shiftKey) {
+        artworkOverlay.selectHost()
+    } else {
+        artworkOverlay.check()
+    }
 }, { capture: true })
 
 // When a pixiv post from a different artist is clicked, the container with pictures
@@ -280,11 +284,11 @@ browser.runtime.onMessage.addListener((message, sender) => {
     if (sender.id !== browser.runtime.id) return
     if (!message || !message.type) return
 
-    // Extension will send notification if an upload status on Gelbooru changes
+    // Extension will send notification if an upload status changes
     if (message.type === "pixiv-status-update") {
         if (!message.args) return
-        thumbnailStatus.update(message.args.pixivIdToGelbooruIds)
-        const fileMap = message.args.filenameToGelbooruIds
+        thumbnailStatus.update(message.args.pixivIdToPostIds)
+        const fileMap = message.args.filenameToPostIds
         if (fileMap) {
             for (const filename in fileMap) {
                 ArtworkOverlay.update(filename, fileMap[filename])

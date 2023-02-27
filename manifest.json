@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Pixiv to Gelbooru upload helper",
-    "version": "1.0.0",
+    "version": "1.1.0",
 
     "description": "Enhances Pixiv to facilitate uploading pictures to Gelbooru.",
 
@@ -24,6 +24,13 @@
         {
             "matches": ["https://www.pixiv.net/*"],
             "js": ["pixivScript.js"]
+        }
+    ],
+
+    "web_accessible_resources": [
+        {
+            "resources": ["icons/*-favicon.png"],
+            "matches": ["https://www.pixiv.net/*"]
         }
     ],
 

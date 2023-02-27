@@ -1,15 +1,15 @@
 import browser from "webextension-polyfill";
-import { PixivIdToGelbooruIds, ThumbnailSize } from "./types";
+import { ThumbnailSize, HostName, UploadStatus, StatusMap, HostMaps } from "./types";
 import ThumbnailPanel from "./thumbnail-panel";
 import "./thumbnail-status.scss"
 
 export default class ThumbnailStatus {
     private readonly pixivIdToElements = new Map<string, HTMLElement[]>()
-    private readonly pixivIdToGelbooruIds: PixivIdToGelbooruIds = new Map()
+    private readonly hostMaps: HostMaps = {}
     private showMarkers = true
 
     // Observer for a container where links to artwork posts are added and removed
-    // dynamically. Updates those links and requests Gelbooru status if necessary.
+    // dynamically. Updates those links and requests upload status if necessary.
     private readonly linkContainerObserver = new MutationObserver((mutationList) => {
         for (const mutation of mutationList) {
             this.handlePixivLinks(mutation.addedNodes)
@@ -58,7 +58,7 @@ export default class ThumbnailStatus {
         for (const { container, size } of containers) {
             this.linkContainerObserver.observe(container, { childList: true })
             initialLinks.push(...container.children)
-            const panel = new ThumbnailPanel(this.pixivIdToGelbooruIds, size)
+            const panel = new ThumbnailPanel(this.hostMaps, size)
             panel.attachTo(container)
             // Sometimes the container gets replaced with a new one,
             // use a childList observer on the parent to catch those cases
@@ -78,7 +78,7 @@ export default class ThumbnailStatus {
         this.handlePixivLinks(initialLinks)
     }
 
-    update(statusMap: { [key in string]: string[] }) {
+    update(statusMap: StatusMap) {
         for (const pixivId in statusMap) {
             if (!this.pixivIdToElements.has(pixivId)) continue
             this.updateArtworkStatus(pixivId, statusMap[pixivId])
@@ -86,7 +86,10 @@ export default class ThumbnailStatus {
     }
 
     clear() {
-        this.pixivIdToGelbooruIds.clear()
+        for (const key in this.hostMaps) {
+            const host = key as HostName
+            this.hostMaps[host]!.clear()
+        }
     }
 
     // Toggle markers on/off 
@@ -106,69 +109,95 @@ export default class ThumbnailStatus {
     // Fully handle a list of link elements, i.e. register them, request status
     // from background page if needed, and perform modifications in the DOM
     private handlePixivLinks(linkElements: Iterable<Node | Element>) {
+        const isKnownPixivId = (pixivId: string) => {
+            for (const key in this.hostMaps) {
+                const host = key as HostName
+                const pixivIdToPostIds = this.hostMaps[host]!
+                if (pixivIdToPostIds.has(pixivId)) return true
+            }
+            return false
+        }
         const newPixivIds: string[] = []
         for (const element of linkElements) {
             const pixivId = this.registerPixivLink(element as HTMLElement)
             if (typeof pixivId === "string") {
-                if (this.pixivIdToGelbooruIds.has(pixivId)) {
+                if (isKnownPixivId(pixivId)) {
                     this.updateLinkElements(pixivId)
                 } else {
                     newPixivIds.push(pixivId)
                 }
             } else {
                 pixivId.then(pixivId => {
-                    if (this.pixivIdToGelbooruIds.has(pixivId)) {
+                    if (isKnownPixivId(pixivId)) {
                         this.updateLinkElements(pixivId)
                     } else {
-                        this.requestGelbooruStatus([pixivId])
+                        this.requestUploadStatus([pixivId])
                     }
                 })
             }
         }
         if (newPixivIds.length > 0) {
-            this.requestGelbooruStatus(newPixivIds)
+            this.requestUploadStatus(newPixivIds)
         }
     }
 
-    // Request Gelbooru status from background page and update mapping
-    private async requestGelbooruStatus(pixivIds: string[]) {
+    // Request upload status from background page and update mapping
+    private async requestUploadStatus(pixivIds: string[], host?: HostName) {
         if (pixivIds.length === 0) return
-        const statusMap = await browser.runtime.sendMessage({
-            type: "get-gelbooru-status",
-            args: { pixivIds }
+        const statusMap: StatusMap = await browser.runtime.sendMessage({
+            type: "get-host-status",
+            args: { pixivIds, host }
         })
         for (const pixivId in statusMap) {
             this.updateArtworkStatus(pixivId, statusMap[pixivId])
         }
     }
 
-    // Update mapping from Pixiv ID to list of Gelbooru IDs
-    private updateArtworkStatus(pixivId: string, gelbooruIds: string[]) {
-        if (!this.pixivIdToGelbooruIds.has(pixivId)) {
-            this.pixivIdToGelbooruIds.set(pixivId, gelbooruIds)
-        } else {
-            const knownGelbooruIds = this.pixivIdToGelbooruIds.get(pixivId)!
-            for (const gelbooruId of gelbooruIds) {
-                if (!knownGelbooruIds.includes(gelbooruId))
-                    knownGelbooruIds.push(gelbooruId)
+    // Update mapping from Pixiv ID to list of post IDs
+    private updateArtworkStatus(pixivId: string, uploadStatus: UploadStatus) {
+        for (const key in uploadStatus) {
+            const host = key as HostName
+            const postIds = uploadStatus[host]!
+            let pixivIdToPostIds = this.hostMaps[host]
+            if (!pixivIdToPostIds) {
+                pixivIdToPostIds = new Map()
+                this.hostMaps[host] = pixivIdToPostIds
+            }
+            if (!pixivIdToPostIds.has(pixivId)) {
+                pixivIdToPostIds.set(pixivId, postIds)
+            } else {
+                const knownPostIds = pixivIdToPostIds.get(pixivId)!
+                for (const postId of postIds) {
+                    if (!knownPostIds.includes(postId))
+                        knownPostIds.push(postId)
+                }
             }
         }
         this.updateLinkElements(pixivId)
     }
 
     // Visually update link elements pointing to artwork with given pixiv ID
-    // according to its Gelbooru status
+    // according to its upload status
     private updateLinkElements(pixivId: string) {
         if (!this.showMarkers) return
         const linkElements = this.pixivIdToElements.get(pixivId)
-        const gelbooruIds = this.pixivIdToGelbooruIds.get(pixivId)
         if (linkElements === undefined) return
-        if (gelbooruIds === undefined) return
+        let numPosts = 0
+        let isChecked = false
+        for (const key in this.hostMaps) {
+            const host = key as HostName
+            const pixivIdToPostIds = this.hostMaps[host]!
+            const postIds = pixivIdToPostIds.get(pixivId)
+            if (!postIds) continue
+            isChecked = true
+            numPosts += postIds.length
+        }
+        if (!isChecked) return
         for (const linkElement of linkElements) {
             // Large tiles have "size" attribute, highlight them more
             if (linkElement.hasAttribute("size")) linkElement.classList.add("large")
-            linkElement.classList.toggle("checked-uploaded", gelbooruIds.length > 0)
-            linkElement.classList.toggle("checked-not-uploaded", gelbooruIds.length === 0)
+            linkElement.classList.toggle("checked-uploaded", numPosts > 0)
+            linkElement.classList.toggle("checked-not-uploaded", numPosts === 0)
         }
     }
 
