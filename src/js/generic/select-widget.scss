@@ -1,0 +1,18 @@
+.select-widget {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+
+  select {
+    padding: 5px;
+    border-radius: 5px;
+    background-color: transparent;
+    margin-left: 15px;
+    color: var(--color);
+
+    option {
+      color: var(--color);
+      background-color: var(--background-color);
+    }
+  }
+}

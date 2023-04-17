@@ -5,3 +5,9 @@
 .hidden {
     display: none !important;
 }
+
+.post-thumbnail {
+  object-fit: contain;
+  max-width: 135px;
+  max-height: 135px;
+}

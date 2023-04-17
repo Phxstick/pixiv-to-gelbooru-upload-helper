@@ -11,8 +11,9 @@ const root = document.getElementById("root") as HTMLElement
 const thumbnailStatus = new ThumbnailStatus()
 const artistCheck =  new ArtistCheck()
 
-const currentSettings = SettingsManager.getDefaultValues();
+let currentSettings = SettingsManager.getDefaultValues();
 const settingsLoaded = browser.runtime.sendMessage({ type: "get-settings" }).then(updateSettings)
+thumbnailStatus.setHosts(currentSettings.enabledHosts as HostName[])
 
 let stickyParent: HTMLElement
 const stickyParentObserver = new MutationObserver(() => {
@@ -24,7 +25,7 @@ const stickyParentObserver = new MutationObserver(() => {
 
 function applySettings(changedSettings?: Set<keyof Settings>) {
     const mainElement = document.querySelector("main")
-    const hasChanged = (key: keyof Settings) => changedSettings ? changedSettings.has(key) : currentSettings[key]
+    const hasChanged = (key: keyof Settings) => !changedSettings || changedSettings.has(key)
     if (hasChanged("hideRelatedPixivPics")) {
         const listElements = [...root.querySelectorAll("aside ul")] as HTMLElement[]
         const relatedPicsContainer = listElements[listElements.length - 1]
@@ -62,14 +63,42 @@ function applySettings(changedSettings?: Set<keyof Settings>) {
     if (hasChanged("showThumbnailStatus")) {
         thumbnailStatus.toggle(currentSettings.showThumbnailStatus)
     }
+    if (hasChanged("showPostScore")) {
+        ArtworkOverlay.togglePostScores(currentSettings.showPostScore)
+    }
+    if (hasChanged("enabledHosts")) {
+        thumbnailStatus.setHosts(currentSettings.enabledHosts as HostName[])
+        ArtworkOverlay.updateHosts(currentSettings.enabledHosts as HostName[])
+    }
+    if (hasChanged("defaultHost")) {
+        ArtworkOverlay.updateDefaultHost(currentSettings.defaultHost as HostName)
+    }
+}
+
+function isEqual<T>(value1: T, value2: T): boolean {
+    if (Array.isArray(value1)) {
+        const a1 = value1 as Array<any>
+        const a2 = value2 as Array<any>
+        if (a1.length !== a2.length) return false
+        for (let i = 0; i < a1.length; ++i) {
+            if (a1[i] !== a2[i]) {
+                return false
+            }
+        }
+        return true
+    } else {
+        return value1 === value2
+    }
 }
 
 async function updateSettings(settings: Settings): Promise<Set<keyof Settings>> {
     const changedSettings = new Set<keyof Settings>()
     for (const setting in settings) {
         const settingKey = setting as keyof Settings
-        if (settings[settingKey] !== currentSettings[settingKey]) {
-            currentSettings[settingKey] = settings[settingKey]
+        if (!isEqual(settings[settingKey], currentSettings[settingKey])) {
+            // For some reason, this line leads to a type error, no idea why
+            // currentSettings[settingKey] = settings[settingKey]
+            currentSettings = { ...currentSettings, [settingKey]: settings[settingKey] }
             changedSettings.add(settingKey)
         }
     }
@@ -139,11 +168,13 @@ document.addEventListener("click", async (event) => {
     // Otherwise create new overlay, download and check image
     const pixivTags = gatherPixivTags()
     const artworkOverlay = new ArtworkOverlay(img, url, pixivTags)
+    artworkOverlay.setHosts(currentSettings.enabledHosts as HostName[])
     artworkOverlay.show()
     if (event.shiftKey) {
         artworkOverlay.selectHost()
     } else {
-        artworkOverlay.check()
+        artworkOverlay.check(event.altKey ?
+            "all-hosts" : currentSettings.defaultHost as HostName)
     }
 }, { capture: true })
 
@@ -189,17 +220,20 @@ function getListing(section: HTMLElement) {
 }
 
 function handleArtworkPage(navElements: HTMLElement[]) {
-    settingsLoaded.then(() => applySettings())
     ArtworkOverlay.clear()
 
     const adjacentPicsContainer = navElements[1] as HTMLElement
     const picsByArtistContainer = navElements[0].children[0] as HTMLElement
-    const relatedPicsContainer = document.querySelector("aside ul") as HTMLElement
-    thumbnailStatus.manage([
-        { container: adjacentPicsContainer, size: "small" },
-        { container: picsByArtistContainer, size: "medium" },
-        { container: relatedPicsContainer, size: "large" }
-    ])
+    const listElements = [...document.querySelectorAll("aside ul")] as HTMLElement[]
+    const relatedPicsContainer = listElements[listElements.length - 1]
+    settingsLoaded.then(() => {
+        applySettings()
+        thumbnailStatus.manage([
+            { container: adjacentPicsContainer, size: "small" },
+            { container: picsByArtistContainer, size: "medium" },
+            { container: relatedPicsContainer, size: "large" }
+        ])
+    })
 
     const picsByArtistWrapper = navElements[0].parentElement!.parentElement!
     picsByArtistWrapperObserver.disconnect()
@@ -222,8 +256,10 @@ function handleListingPage(listing: HTMLElement) {
     listingWrapperObserver.observe(listingWrapper, { childList: true })
     listingWrapperObserver.observe(listingWrapper.parentElement!, { childList: true })
 
-    settingsLoaded.then(() => applySettings())
-    thumbnailStatus.manage([{ container: listing, size: "large" }])
+    settingsLoaded.then(() => {
+        applySettings()
+        thumbnailStatus.manage([{ container: listing, size: "large" }])
+    })
 
     // Click artist name or profile picture to check artist posts
     const artistNameDiv = document.querySelector("h1")!

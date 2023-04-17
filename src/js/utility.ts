@@ -1,5 +1,5 @@
 import browser from "webextension-polyfill";
-import { HostName } from "./types"
+import { HostName, BooruPost } from "./types"
 
 export function E(type: string, props?: any, children?: (HTMLElement | string)[] | string): HTMLElement {
     const element = document.createElement(type);
@@ -33,17 +33,37 @@ export function E(type: string, props?: any, children?: (HTMLElement | string)[]
 interface ToggleProps {
     label: string
     defaultValue: boolean
+    canToggle?: (value: boolean) => boolean | Promise<boolean>
     onChange?: (value: boolean) => void
 }
+
 export function createToggle(props: ToggleProps) {
-    let isChecked = false
     const element = E("div", { class: "ui toggle checkbox" }, [
         E("input", { type: "checkbox" }),
         E("label", {}, props.label)
     ])
     $(element).checkbox({
+        beforeChecked: () => {
+            if (!props.canToggle) return
+            Promise.resolve(props.canToggle(true)).then((allowed) => {
+                if (!allowed) return
+                $(element).checkbox("set checked")
+                if (props.onChange) props.onChange(true)
+            })
+            return false
+        },
+        beforeUnchecked: () => {
+            if (!props.canToggle) return
+            Promise.resolve(props.canToggle(false)).then((allowed) => {
+                if (!allowed) return
+                $(element).checkbox("set unchecked")
+                if (props.onChange) props.onChange(false)
+            })
+            return false
+        },
         onChange: () => {
-            isChecked = $(element).checkbox("is checked")
+            if (props.canToggle) return
+            const isChecked = $(element).checkbox("is checked")
             if (props.onChange) props.onChange(isChecked)
         }
     })
@@ -51,6 +71,50 @@ export function createToggle(props: ToggleProps) {
         $(element).checkbox("set checked")
     }
     return element
+}
+
+interface ToggleGroupProps {
+    header: string
+    labels: string[]
+    defaultValues: boolean[]
+    onChange?: (values: boolean[]) => void
+    atLeastOne?: boolean
+}
+export function createToggleGroup(props: ToggleGroupProps) {
+    const { header, labels, defaultValues, onChange, atLeastOne } = props
+    if (labels.length !== defaultValues.length) {
+        throw new Error("There must be as many labels as values.")
+    }
+    const currentValues = [...defaultValues]
+    const togglesContainer = E("div", { class: "toggles-container" })
+    const wrapper = E("div", { class: "toggle-group" }, [
+        E("div", { class: "header" }, header),
+        togglesContainer
+    ])
+    for (let i = 0; i < labels.length; ++i) {
+        const toggle = createToggle({
+            label: labels[i],
+            defaultValue: defaultValues[i],
+            onChange: (value) => {
+                currentValues[i] = value
+                if (onChange) onChange(currentValues)
+            },
+            canToggle: (value) => {
+                if (!atLeastOne) return true
+                let numSelected = 0
+                for (let j = 0; j < labels.length; ++j) {
+                    if (currentValues[j]) numSelected += 1
+                }
+                if (numSelected === 1 && currentValues[i] && !value) {
+                    alert("At least one option must be selected.")
+                    return false
+                }
+                return true
+            }
+        })
+        togglesContainer.appendChild(toggle)
+    }
+    return wrapper
 }
 
 interface InputProps {
@@ -98,11 +162,21 @@ export function createPostLink(
     container: HTMLElement,
     postId: string,
     host: HostName,
-    text?: string
+    text?: string,
+    post?: BooruPost,
+    showScore = false,
+    showThumbnail = false
 ): HTMLElement {
     const iconUrl = browser.runtime.getURL(`icons/${host}-favicon.png`)
-    const content = text ? text : [E("img", { src: iconUrl })]
-    // if (!text) text = (container.children.length + 1).toString()
+    const content = showThumbnail && post ? [E("img", {
+        class: "post-thumbnail",
+        src: post.thumbnailUrl
+    })] : text ? [E("span", {}, text)] : [E("img", { src: iconUrl })]
+    if (post && showScore) {
+        const score = Math.max(post.score, post.favCount || 0)
+        const upvotesString = text ? `(${score}🠝)` : `${score}🠝`
+        content.push(E("span", { class: "upvotes" }, upvotesString))
+    }
     let href: string
     if (host === HostName.Gelbooru) {
         href = "https://gelbooru.com/index.php?page=post&s=view&id=" + postId
@@ -111,7 +185,27 @@ export function createPostLink(
     } else {
         throw new Error(`Unknown image host ${host}.`)
     }
-    const link = E("a", { class: "post-link", target: "_blank", href }, content)
+    const classString = "post-link" + (text ? "" :
+        (showThumbnail ? " with-thumbnail" : " only-icon"))
+    const link = E("a", { class: classString, target: "_blank", href }, content)
     container.appendChild(link)
     return link
+}
+
+type Func<T> = () => (T | Promise<T>)
+type ResultAndError<T> = [T, null] | [null, Error]
+
+export async function catchError<T>(func: Func<T>): Promise<ResultAndError<T>> {
+    try {
+        const result = await func()
+        return [result, null]
+    } catch (error) {
+        if (error instanceof Error) {
+            return [null, error]
+        } else if (typeof error === "string") {
+            return [null, new Error(error)]
+        } else {
+            return [null, new Error("Internal error")]
+        }
+    }
 }

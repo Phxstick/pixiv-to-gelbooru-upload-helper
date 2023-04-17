@@ -1,6 +1,6 @@
 import SettingsManager from "js/settings-manager";
 import browser from "webextension-polyfill";
-import { HostName, StatusMap } from "js/types";
+import { HostName, StatusMap, PixivId, PostsMap } from "js/types";
 
 type PixivIdToPostIds = { [key in string]: string[] }
 
@@ -94,39 +94,46 @@ async function getArtistTags(url: string): Promise<string[]> {
     return [...response.html.matchAll(regex)].map(match => match[1].trim())
 }
 
-async function handleArtistStatusCheck(url: string, host: HostName) {
+async function handleArtistStatusCheck(url: string, hosts: HostName[]) {
     const artistTags = await getArtistTags(url)
-    let numPixivIds = 0
-    let numPosts = 0
     if (artistTags.length === 0) {
-        return { numPixivIds, numPosts }
+        return { pixivIds: [], numPosts: {} }
     }
+    const pixivIdSet = new Set<PixivId>()
+    const numPosts: { [key in HostName]?: number } = {}
     const statusMap: StatusMap = {}
     for (const artistTag of artistTags) {
-        const artistStatusMap = await getPostsForArtistTag(artistTag, host)
-        for (const pixivId in artistStatusMap) {
-            const postIds = artistStatusMap[pixivId]
-            if (!(pixivId in statusMap)) {
-                statusMap[pixivId] = { [host]: postIds }
-                numPosts += postIds.length
-                numPixivIds++
-            } else {
-                for (const postId of postIds) {
-                    if (!statusMap[pixivId][host]!.includes(postId)) {
-                        statusMap[pixivId][host]!.push(postId)
-                        numPosts++
+        for (const host of hosts) {
+            numPosts[host] = 0
+            const artistStatusMap = await getPostsForArtistTag(artistTag, host)
+            for (const pixivId in artistStatusMap) {
+                const postIds = artistStatusMap[pixivId]
+                if (!(pixivId in statusMap)) {
+                    statusMap[pixivId] = { [host]: postIds }
+                    pixivIdSet.add(pixivId)
+                    numPosts[host]! += postIds.length
+                } else {
+                    if (!(host in statusMap[pixivId])) {
+                        statusMap[pixivId][host] = []
+                    }
+                    for (const postId of postIds) {
+                        if (!statusMap[pixivId][host]!.includes(postId)) {
+                            statusMap[pixivId][host]!.push(postId)
+                            numPosts[host]! += 1
+                        }
                     }
                 }
             }
         }
     }
     handleUploadStatusUpdate({ pixivIdToPostIds: statusMap })
-    return { numPixivIds, numPosts }
+    return { pixivIds: [...pixivIdSet], numPosts }
 }
 
 interface StatusUpdate {
     pixivIdToPostIds: StatusMap
     filenameToPostIds?: StatusMap
+    posts?: PostsMap
 }
 
 async function handleUploadStatusUpdate(statusUpdate: StatusUpdate) {
@@ -226,11 +233,11 @@ browser.runtime.onMessage.addListener(async (request, sender) => {
         // Just forward messages with these types to the upload extension
         return browser.runtime.sendMessage(UPLOAD_EXTENSION, request)
     } else if (request.type === "find-posts-by-artist") {
-        return handleArtistStatusCheck(args.url, args.host)
+        return handleArtistStatusCheck(args.url, args.hosts)
     } else if (request.type === "pixiv-status-update") {
         handleUploadStatusUpdate(args as StatusUpdate)
     } else if (request.type === "get-host-status") {
-        return getPostsForPixivIds(args.pixivIds, args.host)
+        return getPostsForPixivIds(args.pixivIds, args.hosts)
     } else if (request.type === "get-settings") {
         return SettingsManager.getAll()
     } else if (request.type === "settings-changed") {

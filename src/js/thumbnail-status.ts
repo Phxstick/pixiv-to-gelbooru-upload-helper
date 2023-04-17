@@ -6,6 +6,7 @@ import "./thumbnail-status.scss"
 export default class ThumbnailStatus {
     private readonly pixivIdToElements = new Map<string, HTMLElement[]>()
     private readonly hostMaps: HostMaps = {}
+    private hosts: HostName[] = []
     private showMarkers = true
 
     // Observer for a container where links to artwork posts are added and removed
@@ -96,39 +97,47 @@ export default class ThumbnailStatus {
     toggle(enabled: boolean) {
         this.showMarkers = enabled
         for (const [pixivId, linkElements] of this.pixivIdToElements.entries()) {
-            for (const linkElement of linkElements) {
-                if (!enabled) {
-                    linkElement.classList.remove("checked-uploaded", "checked-not-uploaded")
-                } else {
-                    this.updateLinkElements(pixivId)
+            if (enabled) {
+                this.updateLinkElements(pixivId)
+            } else {
+                for (const linkElement of linkElements) {
+                    linkElement.classList.remove(
+                        "checked-uploaded", "checked-mixed", "checked-not-uploaded")
                 }
             }
+        }
+    }
+
+    setHosts(hosts: HostName[]) {
+        this.hosts = hosts
+        if (this.showMarkers) {
+            this.requestUploadStatus([...this.pixivIdToElements.keys()])
         }
     }
 
     // Fully handle a list of link elements, i.e. register them, request status
     // from background page if needed, and perform modifications in the DOM
     private handlePixivLinks(linkElements: Iterable<Node | Element>) {
-        const isKnownPixivId = (pixivId: string) => {
-            for (const key in this.hostMaps) {
-                const host = key as HostName
-                const pixivIdToPostIds = this.hostMaps[host]!
-                if (pixivIdToPostIds.has(pixivId)) return true
+        const isCheckedPixivId = (pixivId: string) => {
+            for (const host of this.hosts) {
+                const pixivIdToPostIds = this.hostMaps[host]
+                if (!pixivIdToPostIds) return false
+                if (!pixivIdToPostIds.has(pixivId)) return false
             }
-            return false
+            return true
         }
         const newPixivIds: string[] = []
         for (const element of linkElements) {
             const pixivId = this.registerPixivLink(element as HTMLElement)
             if (typeof pixivId === "string") {
-                if (isKnownPixivId(pixivId)) {
+                if (isCheckedPixivId(pixivId)) {
                     this.updateLinkElements(pixivId)
                 } else {
                     newPixivIds.push(pixivId)
                 }
             } else {
                 pixivId.then(pixivId => {
-                    if (isKnownPixivId(pixivId)) {
+                    if (isCheckedPixivId(pixivId)) {
                         this.updateLinkElements(pixivId)
                     } else {
                         this.requestUploadStatus([pixivId])
@@ -142,11 +151,11 @@ export default class ThumbnailStatus {
     }
 
     // Request upload status from background page and update mapping
-    private async requestUploadStatus(pixivIds: string[], host?: HostName) {
+    private async requestUploadStatus(pixivIds: string[]) {
         if (pixivIds.length === 0) return
         const statusMap: StatusMap = await browser.runtime.sendMessage({
             type: "get-host-status",
-            args: { pixivIds, host }
+            args: { pixivIds, hosts: this.hosts }
         })
         for (const pixivId in statusMap) {
             this.updateArtworkStatus(pixivId, statusMap[pixivId])
@@ -184,19 +193,31 @@ export default class ThumbnailStatus {
         if (linkElements === undefined) return
         let numPosts = 0
         let isChecked = false
-        for (const key in this.hostMaps) {
-            const host = key as HostName
-            const pixivIdToPostIds = this.hostMaps[host]!
+        let isSomeHostMissing = false
+        let isPartiallyChecked = false
+        for (const host of this.hosts) {
+            const pixivIdToPostIds = this.hostMaps[host]
+            if (!pixivIdToPostIds) {
+                isPartiallyChecked = true
+                continue
+            }
             const postIds = pixivIdToPostIds.get(pixivId)
-            if (!postIds) continue
+            if (!postIds) {
+                isPartiallyChecked = true
+                continue
+            }
             isChecked = true
             numPosts += postIds.length
+            if (postIds.length === 0)
+                isSomeHostMissing = true
         }
         if (!isChecked) return
         for (const linkElement of linkElements) {
             // Large tiles have "size" attribute, highlight them more
             if (linkElement.hasAttribute("size")) linkElement.classList.add("large")
-            linkElement.classList.toggle("checked-uploaded", numPosts > 0)
+            linkElement.classList.toggle("partially-checked", isPartiallyChecked)
+            linkElement.classList.toggle("checked-uploaded", numPosts > 0 && !isSomeHostMissing)
+            linkElement.classList.toggle("checked-mixed", numPosts > 0 && isSomeHostMissing)
             linkElement.classList.toggle("checked-not-uploaded", numPosts === 0)
         }
     }
@@ -226,16 +247,31 @@ export default class ThumbnailStatus {
     // Extract pixiv ID from given link
     private extractPixivId(linkElement: HTMLElement): string | Promise<string> {
         let aElement = linkElement.querySelector("a")
-        if (aElement !== null) return aElement.dataset.gtmValue!
+        if (aElement !== null) {
+            const pixivId = aElement.dataset.gtmValue
+            if (!pixivId) {
+                console.log("aElement:", aElement)
+                alert("Error in part 1")
+                throw new Error("Error in part 1")
+            }
+            return pixivId
+        }
         // <a> element in subtree of a link might not be present immediately,
         // in that case use an childList observer to determine when it appears
         // (NOTE: in some cases, it never appears, write code accordingly)
-        return new Promise<string>((resolve) => {
+        return new Promise<string>((resolve, reject) => {
             const linkLoadObserver = new MutationObserver(() => {
                 const aElement = linkElement.querySelector("a")
                 if (aElement !== null) {
+                    const pixivId = aElement.dataset.gtmValue
+                    if (!pixivId) {
+                        console.log("aElement:", aElement)
+                        alert("Error in part 2")
+                        reject("Error in part 2")
+                        return
+                    }
                     linkLoadObserver.disconnect()
-                    resolve(aElement.dataset.gtmValue!)
+                    resolve(pixivId)
                 }
             })
             linkLoadObserver.observe(linkElement, { childList: true, subtree: true })

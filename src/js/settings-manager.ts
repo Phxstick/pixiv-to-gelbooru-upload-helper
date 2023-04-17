@@ -1,5 +1,6 @@
 import browser from "webextension-polyfill"
-import { Settings, SettingsDefinition } from "js/types";
+import { Settings, SettingsDefinition, HostName } from "js/types";
+import SelectWidget from "js/generic/select-widget";
 
 type SettingKey = keyof Settings
 type SettingValue<Key extends SettingKey> = Settings[Key]
@@ -7,8 +8,11 @@ type SettingValue<Key extends SettingKey> = Settings[Key]
 class SettingsManager {
     private static readonly defaults: Settings = {
         showThumbnailStatus: true,
+        showPostScore: false,
         hideRelatedPixivPics: false,
-        hidePixivHeader: false
+        hidePixivHeader: false,
+        enabledHosts: [HostName.Gelbooru],
+        defaultHost: HostName.Gelbooru
     }
 
     public static getDefaultValues(): Settings {
@@ -19,16 +23,52 @@ class SettingsManager {
         return {
             showThumbnailStatus: {
                 type: "boolean",
-                text: "Mark thumbnails according to whether the artwork has been uploaded to an image host",
-                details: "If a Pixiv post contains multiple images, it's enough for one of them to be uploaded already"
+                text: "Mark thumbnails according to whether the artwork has been uploaded to an image board",
+                details: "If a Pixiv post contains multiple images, it's enough for one of them to be uploaded already."
+            },
+            showPostScore: {
+                type: "boolean",
+                text: "Display the scores (upvotes) of posts on image boards"
             },
             hideRelatedPixivPics: {
                 type: "boolean",
-                text: "Hide related Pixiv posts at the bottom of artwork pages"
+                text: "Hide related Pixiv artworks at the bottom of artwork pages"
             },
             hidePixivHeader: {
                 type: "boolean",
                 text: "Hide navigation bar at the top of artwork pages"
+            },
+            enabledHosts: {
+                type: "multi-select",
+                text: "Enabled image boards:",
+                labels: Object.keys(HostName),
+                values: Object.values(HostName),
+                atLeastOne: true
+            },
+            defaultHost: {
+                type: "select",
+                text: "Default image board:",
+                labels: [],
+                values: [],
+                details:
+                    "This option will be used when checking an image using ctrl + click.<br>" +
+                    "Use <b>shift</b> + ctrl + click to select one of the enabled sites.<br>" +
+                    "Use <b>alt</b> + ctrl + click to check all sites at once.",
+                onSettingsChanged: (row: HTMLElement, widget: SelectWidget, settings: Settings) => {
+                    row.classList.toggle("hidden", settings.enabledHosts.length === 1)
+                    let defaultHost = settings.defaultHost
+                    if (!settings.enabledHosts.includes(defaultHost)) {
+                        defaultHost = settings.enabledHosts[0]
+                        SettingsManager.set("defaultHost", defaultHost)
+                    }
+                    if (settings.enabledHosts.length <= 1) return
+                    widget.setValues({
+                        values: [...settings.enabledHosts, "all-hosts"],
+                        labels: [...settings.enabledHosts.map(
+                            host => host[0].toUpperCase() + host.slice(1)), "All sites"],
+                        defaultValue: defaultHost
+                    })
+                }
             }
         }
     }

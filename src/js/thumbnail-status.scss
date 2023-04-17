@@ -1,13 +1,12 @@
-.checked-not-uploaded {
+.checked-not-uploaded, .checked-mixed, .checked-uploaded {
     div[type="illust"] {
         mask-image: unset !important;
         -webkit-mask-image: unset !important;
         overflow: visible !important;
     }
-
     div[radius] {
-        box-shadow: 0 0 5px 4px crimson;
-        outline: 1px solid #eee; // firebrick;
+        outline: 1px solid #eee;  // firebrick; // blue;
+        box-shadow: 0 0 5px 4px var(--highlight-color);
         &[radius="4"] {
             border-radius: 4px;
         }
@@ -15,37 +14,34 @@
             border-radius: 8px;
         }
     }
-
     &.large {
         div[radius] {
-            box-shadow: 0 0 10px 8px crimson;
-            outline: 2px solid #eee; // firebrick;
+            box-shadow: 0 0 10px 8px var(--highlight-color);
+            outline: 2px solid #eee;  // firebrick; // blue;
         }
     }
 }
 
+.checked-not-uploaded {
+    --highlight-color: crimson;
+
+    &.partially-checked {
+        --highlight-color: coral;
+    }
+}
+
+.checked-mixed {
+    --highlight-color: #a900f2;  // lighten(darkviolet, 6%)
+
+    &.partially-checked {
+        --highlight-color: fuchsia;
+    }
+}
+
 .checked-uploaded {
-    div[type="illust"] {
-        mask-image: unset !important;
-        -webkit-mask-image: unset !important;
-        overflow: visible !important;
-    }
+    --highlight-color: #006ffa;
 
-    div[radius] {
-        box-shadow: 0 0 5px 4px #006ffa;
-        outline: 1px solid #eee;  // blue;
-        &[radius="4"] {
-            border-radius: 4px;
-        }
-        &[radius="8"] {
-            border-radius: 8px;
-        }
-    }
-
-    &.large {
-        div[radius] {
-            box-shadow: 0 0 10px 8px #006ffa;
-            outline: 2px solid #eee; // blue;
-        }
+    &.partially-checked {
+        --highlight-color: deepskyblue;
     }
 }

@@ -1,6 +1,7 @@
 import SettingsManager from "js/settings-manager";
 import { Settings } from "js/types";
-import { createInput, createToggle, E } from "js/utility";
+import SelectWidget from "js/generic/select-widget";
+import { createInput, createToggle, createToggleGroup, E } from "js/utility";
 import browser from "webextension-polyfill";
 
 import $ from "jquery";
@@ -20,15 +21,28 @@ import "fomantic-ui/dist/components/form.min.css"
 import "./settings.scss"
 
 window.onload = async () => {
+    const darkMode = window.matchMedia('(prefers-color-scheme: dark)')
+    document.body.classList.toggle("dark-mode", darkMode.matches)
+    darkMode.addEventListener('change', (event) => {
+        document.body.classList.toggle("dark-mode", event.matches)
+    })
+
     const settingsDefinitions = SettingsManager.getDefinitions()
     const keyToRow: { [key in keyof Settings]?: HTMLElement } = {}
     const toggleSubsettingsFuncs: ((show?: boolean) => void)[] = []
-    const values = await SettingsManager.getAll()
+    const settingsChangedListeners: ((settings: Settings) => void)[] = []
+    const currentValues = await SettingsManager.getAll()
+    const onSettingsChanged = async (key: keyof Settings) => {
+        browser.runtime.sendMessage({ type: "settings-changed" })
+        const currentSettings = await SettingsManager.getAll()
+        settingsChangedListeners.forEach(listener => listener(currentSettings))
+    }
     for (const key in settingsDefinitions) {
         const settingKey = key as keyof Settings
         const definition = settingsDefinitions[settingKey]
-        const currentValue = values[settingKey]
+        const currentValue = currentValues[settingKey]
         let element: HTMLElement
+        let widget: any
         if (definition.type === "boolean") {
             let toggleSubsettings: (show?: boolean) => void = () => {}
             const subSettings = definition.subSettings
@@ -48,7 +62,7 @@ window.onload = async () => {
                 onChange: (value) => {
                     SettingsManager.set(settingKey, value)
                     if (subSettings) toggleSubsettings(value)
-                    browser.runtime.sendMessage({ type: "settings-changed" })
+                    onSettingsChanged(settingKey)
                 }
             })
         } else if (definition.type === "string" || definition.type === "integer") {
@@ -64,16 +78,58 @@ window.onload = async () => {
                         SettingsManager.set(settingKey,
                             definition.type === "integer" ? parseInt(value) as any : value)
                     }
-                    browser.runtime.sendMessage({ type: "settings-changed" })
+                    onSettingsChanged(settingKey)
                 }
             })
             element = input.getElement()
+        } else if (definition.type === "multi-select") {
+            const { text, labels, values, atLeastOne } = definition
+            const defaultValues: boolean[] = []
+            const initialSelection = currentValue as string[]
+            for (let i = 0; i < values.length; ++i) {
+                defaultValues.push(initialSelection.includes(values[i]))
+            }
+            element = createToggleGroup({
+                header: text,
+                labels,
+                defaultValues,
+                atLeastOne,
+                onChange: (flags) => {
+                    const selection = []
+                    for (let i = 0; i < values.length; ++i) {
+                        if (flags[i]) selection.push(values[i])
+                    }
+                    SettingsManager.set(settingKey, selection)
+                    onSettingsChanged(settingKey)
+                }
+            })
+        } else if (definition.type === "select") {
+            const { text, labels, values } = definition
+            widget = new SelectWidget({
+                header: text,
+                labels,
+                values,
+                defaultValue: currentValue as string,
+                onChange: (value) => {
+                    SettingsManager.set(settingKey, value)
+                    onSettingsChanged(settingKey)
+                }
+            })
+            element = widget.getElement()
         } else {
             continue
         }
         const row = E("div", { class: "settings-row" }, [element])
         if (definition.details) {
             row.appendChild(E("div", { class: "setting-details" }, definition.details))
+        }
+        if (definition.onSettingsChanged) {
+            const callback = definition.onSettingsChanged
+            const listener = (settings: Settings) => {
+                callback(row, widget || element, settings)
+            }
+            settingsChangedListeners.push(listener)
+            listener(currentValues)
         }
         keyToRow[settingKey] = row
         document.body.appendChild(row)

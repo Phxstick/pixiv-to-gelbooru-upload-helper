@@ -1,5 +1,6 @@
 import browser from "webextension-polyfill";
-import { E } from "./utility";
+import SettingsManager from "js/settings-manager";
+import { E, catchError } from "./utility";
 import anime from "animejs";
 import { HostName } from "./types";
 import "./artist-check.scss";
@@ -35,12 +36,12 @@ export default class ArtistCheck {
         for (const { element, artistUrl } of containers) {
             element.classList.add("artist-links-container")
 
-            // Ctrl + click element to search for posts
+            // Ctrl + alt + click element to search for posts
             element.addEventListener("click", (event) => {
                 if (!event.ctrlKey || !event.altKey) return
                 event.preventDefault()
                 event.stopImmediatePropagation()
-                this.findPosts(artistUrl, HostName.Gelbooru)
+                this.handleSearch(event, artistUrl)
             })
 
             // Highlight artist when hovingering while pressing the key combination
@@ -73,21 +74,99 @@ export default class ArtistCheck {
         }
     }
 
-    private async findPosts(artistUrl: string, host: HostName) {
+    private async handleSearch(event: MouseEvent, artistUrl: string) {
+        const settings = await SettingsManager.get(["enabledHosts"])
+        const enabledHosts = settings.enabledHosts as HostName[]
+
+        if (enabledHosts.length === 1) {
+            this.findPosts(artistUrl, enabledHosts)
+            return
+        }
+
+        const popupItems = []
+        for (const host of Object.values(enabledHosts)) {
+            const hostName = host[0].toUpperCase() + host.slice(1)
+            const item = E("div", { class: "item" }, hostName)
+            item.addEventListener("click", () => {
+                this.findPosts(artistUrl, [host] as HostName[])
+            })
+            popupItems.push(item)
+        }
+
+        const allHostsItem = E("div", { class: "item" }, "All hosts")
+        allHostsItem.addEventListener("click", () => {
+            this.findPosts(artistUrl, enabledHosts)
+        })
+        popupItems.push(allHostsItem)
+
+        const hostSelectionPopup = E("div", { class: "host-selection-popup" }, [
+            E("div", { class: "header" }, "Choose a host:"),
+            ...popupItems
+        ])
+
+        const closePopup = () => {
+            hostSelectionPopup.remove()
+            window.removeEventListener("keydown", escapeListener)
+            window.removeEventListener("click", clickListener)
+        }
+        const escapeListener = (e: KeyboardEvent) => {
+            if (e.key !== "Escape") return
+            closePopup()
+        }
+        const clickListener = () => {
+            closePopup()
+        }
+        window.addEventListener("keydown", escapeListener)
+        window.addEventListener("click", clickListener)
+
+        hostSelectionPopup.style.left = `${event.clientX}px`
+        hostSelectionPopup.style.top = `${event.clientY}px`
+        document.body.appendChild(hostSelectionPopup)
+    }
+
+    private async findPosts(artistUrl: string, hosts: HostName[]) {
         this.overlay.style.opacity = "0"
         this.overlay.innerHTML = "Searching for posts...";
         this.overlay.classList.remove("hidden")
         anime({ targets: this.overlay, opacity: 1, duration: 140, easing: "linear" })
-        try {
-            const { numPixivIds } = await browser.runtime.sendMessage({
+
+        const [result, error] = await catchError(() =>
+            browser.runtime.sendMessage({
                 type: "find-posts-by-artist",
-                args: { url: artistUrl, host }
+                args: { url: artistUrl, hosts }
             })
+        )
+        if (error) {
+            this.overlay.innerHTML =
+                `The extension "Improved Gelbooru upload"<br>` +
+                `must be enabled to conduct status checks!`
+            return
+        }
+        const { pixivIds, numPosts } = result
+
+        let numPostsTotal = 0
+        for (const host in numPosts) numPostsTotal += numPosts[host]
+        if (numPostsTotal === 0) {
+            this.overlay.innerHTML =
+                `No posts have been found for Pixiv artworks by this artist.`
+            return
+        }
+
+        if (hosts.length === 1) {
+            const host = hosts[0]
             const hostString = host[0].toUpperCase() + host.slice(1)
             this.overlay.innerHTML =
-                `Found ${numPixivIds} Pixiv posts that have<br>been uploaded to ${hostString}!`
-        } catch (error) {
-            this.overlay.innerHTML = `The extension "Improved Gelbooru upload"<br>must be enabled to conduct status checks!`
+                `Found ${numPosts[host]} ${hostString} posts<br>` +
+                `for ${pixivIds.length} Pixiv artworks!`
+            return
+        }
+
+        this.overlay.innerHTML =
+            `Found matching posts for ${pixivIds.length} Pixiv artworks:`
+        for (const host in numPosts) {
+            const hostString = host[0].toUpperCase() + host.slice(1)
+            this.overlay.innerHTML +=
+                `<br>${numPosts[host]} ${hostString} posts`
         }
     }
 }

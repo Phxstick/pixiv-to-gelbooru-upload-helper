@@ -27,3 +27,31 @@
     text-align: center;
     user-select: none;
 }
+.host-selection-popup {
+    position: fixed;
+    z-index: 100;  // Put it above Pixiv's artist-popup which has z-index 12
+    background-color: whitesmoke;
+    color: #333;
+    border-radius: 10px;
+    box-shadow: 0 0 10px #444;
+
+    .header {
+        color: #555;
+        font-size: 1.2rem;
+        padding: 6px 12px;
+        font-family: Helvetica;
+    }
+    .item {
+        padding: 8px 14px;
+        font-size: 1.3rem;
+        text-align: center;
+        cursor: pointer;
+        &:hover {
+            background-color: #e2e2e2;
+        }
+        &:last-child {
+          border-bottom-left-radius: 10px;
+          border-bottom-right-radius: 10px;
+        }
+    }
+}
