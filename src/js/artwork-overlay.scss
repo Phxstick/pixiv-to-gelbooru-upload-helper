@@ -92,25 +92,33 @@
         margin-top: 7px;
 
         &.with-thumbnail {
-          padding: 0;
-          opacity: 0.78;
-          background-color: transparent;
-          box-shadow: none;
+            padding: 0;
+            opacity: 0.78;
+            background-color: transparent;
+            box-shadow: none;
+            display: inline-flex;
+            flex-direction: column;
 
-          .post-thumbnail {
-            border-radius: 7px;
-            box-shadow: 0 0 6px 1.5px white;
-          }
+            .post-thumbnail {
+                border-radius: 7px;
+                box-shadow: 0 0 6px 1.5px white;
+            }
+            .upvotes {
+                line-height: 1.4rem;
+                margin-top: 6px;
+            }
+        }
+        &:not(.with-thumbnail) {
+            &:hover {
+                background-color: rgba(72, 153, 255, 0.84);
+                color: #fff;
+            }
         }
         &.only-icon {
             padding: 13px 13px;
         }
         &:hover {
             opacity: 1;
-        }
-        &:not(.with-thumbnail):hover {
-            background-color: rgba(72, 153, 255, 0.84);
-            color: #fff;
         }
         * {
             pointer-events: none;

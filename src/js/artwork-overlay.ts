@@ -1,6 +1,6 @@
 import browser from "webextension-polyfill";
 import anime from "animejs"
-import { PixivTags, HostName, UploadStatus, BooruPost } from "./types"
+import { PixivTags, HostName, UploadStatus, BooruPost, PostsMap } from "./types"
 import { createPostLink, E } from "./utility"
 import "./artwork-overlay.scss"
 
@@ -81,29 +81,44 @@ export default class ArtworkOverlay {
     }
 
     // Update status of overlay for image with given filename
-    static update(filename: string, uploadStatus: UploadStatus) {
+    static update(filename: string, uploadStatus: UploadStatus, postsMap?: PostsMap) {
         const overlay = ArtworkOverlay.filenameToOverlay.get(filename)
         if (!overlay) return
         const updatePromises: Promise<boolean>[] = []
         for (const key in uploadStatus) {
             const host = key as HostName
             const postIds = uploadStatus[host]!.map(id => parseInt(id))
+            const posts = postsMap ? postsMap[host] : undefined
             const promise = overlay.checkResults.get(host)
             if (!promise) {
-                overlay.checkResults.set(host, Promise.resolve({ postIds, host }))
+                overlay.checkResults.set(host, Promise.resolve({ postIds, host, posts }))
                 updatePromises.push(Promise.resolve(true))
                 continue
             }
             updatePromises.push(promise.then(checkResult => {
+                let updated = false
+                if (posts && Object.keys(posts).length > 0) {
+                    if (!checkResult.posts) {
+                        checkResult.posts = posts
+                        updated = true
+                    } else {
+                        for (const postId in posts) {
+                            if (!(postId in checkResult.posts)) {
+                                checkResult.posts[postId] = posts[postId]
+                                updated = true
+                            }
+                        }
+                    }
+                }
                 if (!checkResult.postIds) {
                     checkResult.postIds = postIds
-                    return true
-                }
-                let updated = false
-                for (const postId of postIds) {
-                    if (!checkResult.postIds.includes(postId)) {
-                        checkResult.postIds.push(postId)
-                        updated = true
+                    updated = true
+                } else {
+                    for (const postId of postIds) {
+                        if (!checkResult.postIds.includes(postId)) {
+                            checkResult.postIds.push(postId)
+                            updated = true
+                        }
                     }
                 }
                 return updated

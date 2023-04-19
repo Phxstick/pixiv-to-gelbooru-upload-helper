@@ -323,11 +323,12 @@ browser.runtime.onMessage.addListener((message, sender) => {
     // Extension will send notification if an upload status changes
     if (message.type === "pixiv-status-update") {
         if (!message.args) return
-        thumbnailStatus.update(message.args.pixivIdToPostIds)
-        const fileMap = message.args.filenameToPostIds
-        if (fileMap) {
-            for (const filename in fileMap) {
-                ArtworkOverlay.update(filename, fileMap[filename])
+        const { pixivIdToPostIds, filenameToPostIds, posts } = message.args
+        thumbnailStatus.update(pixivIdToPostIds)
+        if (filenameToPostIds) {
+            for (const filename in filenameToPostIds) {
+                const statusUpdate = filenameToPostIds[filename]
+                ArtworkOverlay.update(filename, statusUpdate, posts)
             }
         }
     }

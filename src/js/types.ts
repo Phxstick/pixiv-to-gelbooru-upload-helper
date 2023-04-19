@@ -71,5 +71,5 @@ export interface BooruPost {
 }
 
 export type PostsMap = {
-    [key in HostName]?: { [key in string]: BooruPost }
+    [key in HostName]?: { [key in number]: BooruPost }
 }
