@@ -6,8 +6,6 @@ import SettingsManager from "./settings-manager";
 import { PixivTags, Settings, HostName } from "./types";
 import "./pixiv-script.scss"
 
-const root = document.getElementById("root") as HTMLElement
-
 const thumbnailStatus = new ThumbnailStatus()
 const artistCheck =  new ArtistCheck()
 
@@ -24,6 +22,7 @@ const stickyParentObserver = new MutationObserver(() => {
 })
 
 function applySettings(changedSettings?: Set<keyof Settings>) {
+    const root = document.getElementById("root") as HTMLElement
     const mainElement = document.querySelector("main")
     const hasChanged = (key: keyof Settings) => !changedSettings || changedSettings.has(key)
     if (hasChanged("hideRelatedPixivPics")) {
@@ -299,6 +298,7 @@ const listingPageObserver = new MutationObserver(() => {
 let pageType: string | undefined
 
 function main() {
+    const root = document.getElementById("root") as HTMLElement
     if (location.href.includes("/artworks/")) {
         if (pageType === "post") return
         pageType = "post"

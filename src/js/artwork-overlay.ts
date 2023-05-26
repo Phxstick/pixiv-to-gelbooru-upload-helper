@@ -494,11 +494,14 @@ export default class ArtworkOverlay {
         const errorMessage = statusContainer.querySelector(".error-message")!
         const uploadButton = statusContainer.querySelector(".upload-page-button")!
         const postsContainer = statusContainer.querySelector(".post-links") as HTMLElement
+        const checkButton = statusContainer.querySelector(".check-button")!
+        statusMessage.classList.remove("check-failed")
         statusMessage.classList.remove("upload-prepared")
         statusMessage.textContent = "Already uploaded"
         statusMessage.classList.add("already-uploaded")
         errorMessage.classList.add("hidden")
         uploadButton.classList.add("hidden")
+        checkButton.classList.add("hidden")
         const linkText = postIds.length === 1 ? "View post" : undefined
         const showThumbnail = postIds.length > 1
         postsContainer.innerHTML = ""
@@ -569,6 +572,7 @@ export default class ArtworkOverlay {
         }
         this.retryButton.style.display = "none"
         this.progressBar.style.display = "none"
+        this.statusMessage.classList.remove("check-failed")
 
         if (postIds.length === 0) {
             this.statusMessage.textContent = "Upload ready"
@@ -624,6 +628,7 @@ export default class ArtworkOverlay {
         this.selectHostWrapper.style.display = "none"
         this.singleStatusContainer.style.display = "none"
         this.statusMessage.textContent = ""
+        this.statusMessage.classList.remove("check-failed")
         this.statusMessage.classList.remove("upload-prepared")
         this.statusMessage.classList.remove("already-uploaded")
     }
