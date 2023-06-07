@@ -190,6 +190,15 @@ async function handleUploadStatusUpdate(statusUpdate: StatusUpdate) {
     await browser.storage.local.set(storageUpdate)
 }
 
+async function blobToDataUrl(blob: Blob): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+        const fileReader = new FileReader()
+        fileReader.onload = () => resolve(fileReader.result as string)
+        fileReader.onerror = () => reject(fileReader.error)
+        fileReader.readAsDataURL(blob)
+    })
+}
+
 async function handleImageDownload(url: string, port: browser.Runtime.Port) {
     const imgResponse = await fetch(url)
     const reader = imgResponse.body!.getReader()
@@ -206,13 +215,18 @@ async function handleImageDownload(url: string, port: browser.Runtime.Port) {
         port.postMessage({ type: "progress", data: { currentSize, totalSize }})
     }
     const blob = new Blob(imageParts)
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-        const fileReader = new FileReader()
-        fileReader.onload = () => resolve(fileReader.result as string)
-        fileReader.onerror = () => reject(fileReader.error)
-        fileReader.readAsDataURL(blob)
-    })
+    const dataUrl = await blobToDataUrl(blob)
     port.postMessage({ type: "finished", data: { dataUrl }})
+}
+
+async function downloadPixivImage(url: string): Promise<string | null> {
+    try {
+        const response = await fetch(url)
+        const blob = await response.blob()
+        return blobToDataUrl(blob)
+    } catch (error) {
+        return null
+    }
 }
 
 browser.runtime.onConnect.addListener((port) => {
@@ -284,6 +298,8 @@ browser.runtime.onMessageExternal.addListener((request, sender) => {
     const args = request.args || {}
     if (request.type === "pixiv-status-update") {
         handleUploadStatusUpdate(args as StatusUpdate)
+    } else if (request.type === "download-pixiv-image") {
+        return downloadPixivImage(args.url).then(dataUrl => ({ dataUrl }))
     }
 })
 

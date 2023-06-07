@@ -12,6 +12,11 @@ body {
   --toggle-background: rgba(0,0,0,.05);
   --toggle-background-hover: rgba(0,0,0,.15);
   --toggle-background-enabled: #2185d0;
+ 
+  --button-color: rgba(0,0,0,.6);
+  --button-background: #e0e1e2;
+  --button-color-hover: rgba(0,0,0,.8);
+  --button-background-hover: #cacbcd;
 
   &.dark-mode {
     --color: #ccc;
@@ -22,6 +27,11 @@ body {
     --toggle-background: #444;
     --toggle-background-hover: #606060;
     --toggle-background-enabled: #{darken(#2185d0, 12%)};
+
+    --button-color: #bbb;
+    --button-background: #444;
+    --button-color-hover: #dadada;
+    --button-background-hover: #606060;
   }
 }
 
@@ -73,4 +83,31 @@ body {
   input:checked ~ label::before {
     background-color: var(--toggle-background-enabled);
   }
+}
+
+.ui.button {
+  color: var(--button-color);
+  background-color: var(--button-background);
+
+  &:hover {
+    color: var(--button-color-hover);
+    background-color: var(--button-background-hover);
+  }
+}
+
+.backup-buttons button:first-child {
+  margin-right: 14px;
+}
+
+.status-message {
+  margin-top: 8px;
+  font-size: 1.1rem;
+}
+
+.success {
+  color: seagreen;
+}
+
+.failure {
+  color: crimson;
 }

@@ -249,11 +249,8 @@ export default class ThumbnailStatus {
         let aElement = linkElement.querySelector("a")
         if (aElement !== null) {
             const pixivId = aElement.dataset.gtmValue
-            if (!pixivId) {
-                console.log("aElement:", aElement)
-                alert("Error in part 1")
-                throw new Error("Error in part 1")
-            }
+            if (!pixivId)
+                throw new Error("Couldn't find Pixiv ID for link element.")
             return pixivId
         }
         // <a> element in subtree of a link might not be present immediately,
@@ -264,12 +261,8 @@ export default class ThumbnailStatus {
                 const aElement = linkElement.querySelector("a")
                 if (aElement !== null) {
                     const pixivId = aElement.dataset.gtmValue
-                    if (!pixivId) {
-                        console.log("aElement:", aElement)
-                        alert("Error in part 2")
-                        reject("Error in part 2")
-                        return
-                    }
+                    if (!pixivId)
+                        throw new Error("Couldn't find Pixiv ID for link element.")
                     linkLoadObserver.disconnect()
                     resolve(pixivId)
                 }
