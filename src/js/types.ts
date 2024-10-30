@@ -73,3 +73,10 @@ export interface BooruPost {
 export type PostsMap = {
     [key in HostName]?: { [key in number]: BooruPost }
 }
+
+export class UploadExtensionCommunicationError extends Error {
+    constructor() {
+        super("UploadExtensionCommunicationError")
+        this.name = "UploadExtensionCommunicationError"
+    }
+}

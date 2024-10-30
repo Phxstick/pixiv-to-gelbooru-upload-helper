@@ -3,7 +3,7 @@ import ThumbnailStatus from "./thumbnail-status";
 import ArtistCheck from "./artist-check";
 import ArtworkOverlay from "./artwork-overlay";
 import SettingsManager from "./settings-manager";
-import { PixivTags, Settings, HostName } from "./types";
+import { PixivTags, Settings, HostName, ThumbnailSize } from "./types";
 import "./pixiv-script.scss"
 
 const thumbnailStatus = new ThumbnailStatus()
@@ -36,11 +36,14 @@ function applySettings(changedSettings?: Set<keyof Settings>) {
             if (mainElement !== null && mainElement.parentElement !== null) {
                 mainElement.parentElement.style.paddingBottom = currentSettings.hideRelatedPixivPics ? "0" : "56px"
             }
+            if (!currentSettings.hideRelatedPixivPics) {
+                thumbnailStatus.manage([{ container: relatedPicsContainer, size: "large" }])
+            }
         }
     }
     if (hasChanged("hidePixivHeader")) {
         if (root.children[1]) {
-            const header = root.children[1].querySelector(":scope > div > div > div[style]") as HTMLElement | null
+            const header = root.children[1].querySelector(":scope > div > div > div[style*='position: static']") as HTMLElement | null
             if (header) {
                 header.style.display = currentSettings.hidePixivHeader ? "none" : "block"
             }
@@ -193,16 +196,19 @@ const picsByArtistWrapperObserver = new MutationObserver(mutationList => {
         }
     }
 })
+
+const knownListings = new WeakSet<HTMLElement>()
+
 // Also handle switching between listing
 const listingWrapperObserver = new MutationObserver(mutationList => {
     for (const mutation of mutationList) {
         if (mutation.addedNodes.length) {
             for (const node of mutation.addedNodes) {
                 const element = node as HTMLElement
-                const section = element.querySelector("section")
-                if (section === null) continue
-                const listing = getListing(section)
+                const listing = element.querySelector("ul")
                 if (listing === null) continue
+                if (knownListings.has(listing)) continue
+                knownListings.add(listing)
                 thumbnailStatus.clear()
                 thumbnailStatus.manage([{ container: listing, size: "large" }])
             }
@@ -210,13 +216,13 @@ const listingWrapperObserver = new MutationObserver(mutationList => {
     }
 })
 
-function getListing(section: HTMLElement) {
-    if (section.firstChild === null) return null
-    const sectionHeader = section.firstChild.textContent!
-    if (!sectionHeader.startsWith("Illustrations")
-            && !sectionHeader.startsWith("Works")) return null
-    return section.querySelector("ul")
-}
+// function getListing(section: HTMLElement) {
+//     if (section.firstChild === null) return null
+//     const sectionHeader = section.firstChild.textContent!
+//     if (!sectionHeader.startsWith("Illustrations")
+//             && !sectionHeader.startsWith("Works")) return null
+//     return section.querySelector("ul")
+// }
 
 function handleArtworkPage(navElements: HTMLElement[]) {
     ArtworkOverlay.clear()
@@ -227,11 +233,14 @@ function handleArtworkPage(navElements: HTMLElement[]) {
     const relatedPicsContainer = listElements[listElements.length - 1]
     settingsLoaded.then(() => {
         applySettings()
-        thumbnailStatus.manage([
+        const containers: { container: HTMLElement, size: ThumbnailSize }[] = [
             { container: adjacentPicsContainer, size: "small" },
             { container: picsByArtistContainer, size: "medium" },
-            { container: relatedPicsContainer, size: "large" }
-        ])
+        ]
+        if (!currentSettings.hideRelatedPixivPics) {
+            containers.push({ container: relatedPicsContainer, size: "large" })
+        }
+        thumbnailStatus.manage(containers)
     })
 
     const picsByArtistWrapper = navElements[0].parentElement!.parentElement!
@@ -249,7 +258,7 @@ function handleArtworkPage(navElements: HTMLElement[]) {
 }
 
 function handleListingPage(listing: HTMLElement) {
-    const listingWrapper = listing.closest("section")!.parentElement!.parentElement!
+    const listingWrapper = listing.parentElement!.parentElement!.parentElement!.parentElement!
     listingWrapperObserver.disconnect()
     // Wrapper can be different on some pages, observe all possible candidates
     listingWrapperObserver.observe(listingWrapper, { childList: true })
@@ -284,35 +293,55 @@ const postPageObserver = new MutationObserver((mutationList) => {
     postPageObserver.disconnect()
     handleArtworkPage(navElements)
 })
-const listingPageObserver = new MutationObserver(() => {
-    const sections = document.querySelectorAll("section")
-    for (const section of sections) {
-        const listing = getListing(section)
-        if (listing === null) continue
-        listingPageObserver.disconnect()
-        handleListingPage(listing)
-        return
+
+const listingPageObserver = new MutationObserver(mutationList => {
+    for (const mutation of mutationList) {
+        if (mutation.addedNodes.length) {
+            for (const node of mutation.addedNodes) {
+                const element = node as HTMLElement
+                let listing
+                if (element.tagName === "UL") {
+                    listing = element
+                } else if (element.tagName === "LI") {
+                    if (!element.hasAttribute("size")) continue
+                    listing = element.closest("ul") as HTMLElement | null
+                    if (listing === null) continue
+                } else {
+                    continue
+                }
+                if (knownListings.has(listing)) continue
+                knownListings.add(listing)
+                handleListingPage(listing)
+            }
+        }
     }
 })
 
 let pageType: string | undefined
 
 function main() {
-    const root = document.getElementById("root") as HTMLElement
+    // Check if the type of page has changed (otherwise do nothing)
+    let newPageType: string | undefined
     if (location.href.includes("/artworks/")) {
-        if (pageType === "post") return
-        pageType = "post"
-        postPageObserver.observe(root, { childList: true, subtree: true })
+        newPageType = "post"
     } else if (location.href.includes("/users/")) {
-        if (pageType === "listing") return
-        pageType = "listing"
-        listingPageObserver.observe(root, { childList: true, subtree: true })
+        newPageType = "listing"
     } else if (location.href.includes("/tags/")) {
-        if (pageType === "tag") return
-        pageType = "tag"
+        newPageType = "tag"
+    }
+    if (pageType === newPageType) return
+    pageType = newPageType;
+
+    // Reset data structures and connect observers in order to find link containers
+    listingPageObserver.disconnect()
+    postPageObserver.disconnect()
+    thumbnailStatus.clear()
+    artistCheck.clear()
+    const root = document.getElementById("root") as HTMLElement
+    if (pageType === "post") {
+        postPageObserver.observe(root, { childList: true, subtree: true })
+    } else if (pageType === "listing" || pageType === "tag") {
         listingPageObserver.observe(root, { childList: true, subtree: true })
-    } else {
-        pageType = undefined
     }
 }
 

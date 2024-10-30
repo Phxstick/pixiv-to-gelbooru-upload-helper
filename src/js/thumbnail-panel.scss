@@ -4,6 +4,8 @@
     left: 0px;
     right: 0px;
     bottom: 0px;
+    margin: inherit;
+    z-index: 1;
 
     display: flex;
     flex-direction: column;

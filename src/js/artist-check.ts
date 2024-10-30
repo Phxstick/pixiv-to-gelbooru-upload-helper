@@ -24,14 +24,19 @@ export default class ArtistCheck {
         })
     }
 
-    async handleContainers(containers: ArtistContainer[]) {
-        if (!containers.length) return
-
-        // Remove existing event listeners first
+    clear() {
+        // Remove event listeners from the window object
         this.globalKeydownListeners.forEach(listener =>
             window.removeEventListener("keydown", listener))
         this.globalKeyupListeners.forEach(listener =>
             window.removeEventListener("keyup", listener))
+        this.globalKeydownListeners.length = 0;
+        this.globalKeyupListeners.length = 0;
+    }
+
+    async handleContainers(containers: ArtistContainer[]) {
+        if (!containers.length) return
+        this.clear()
 
         for (const { element, artistUrl } of containers) {
             element.classList.add("artist-links-container")
@@ -44,7 +49,7 @@ export default class ArtistCheck {
                 this.handleSearch(event, artistUrl)
             })
 
-            // Highlight artist when hovingering while pressing the key combination
+            // Highlight artist when hovering while pressing the key combination
             let hovering = false
             element.addEventListener("mouseenter", (event) => {
                 hovering = true
@@ -137,9 +142,14 @@ export default class ArtistCheck {
             })
         )
         if (error) {
-            this.overlay.innerHTML =
-                `The extension "Improved Gelbooru upload"<br>` +
-                `must be enabled to conduct status checks!`
+            if (error.message === "UploadExtensionCommunicationError") {
+                this.overlay.innerHTML =
+                    `The extension "Improved Gelbooru upload"<br>` +
+                    `must be enabled to conduct status checks!`
+            } else {
+                this.overlay.innerHTML =
+                    `Status check failed, try again later.`
+            }
             return
         }
         const { pixivIds, numPosts } = result

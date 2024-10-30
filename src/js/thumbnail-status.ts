@@ -8,6 +8,7 @@ export default class ThumbnailStatus {
     private readonly hostMaps: HostMaps = {}
     private hosts: HostName[] = []
     private showMarkers = true
+    private observedContainers = new Set<HTMLElement>()
 
     // Observer for a container where links to artwork posts are added and removed
     // dynamically. Updates those links and requests upload status if necessary.
@@ -53,30 +54,53 @@ export default class ThumbnailStatus {
     })
 
     manage(containers: { container: HTMLElement, size: ThumbnailSize }[]) {
-        this.pixivIdToElements.clear()
-        this.linkContainerObserver.disconnect()
-        const initialLinks = []
-        for (const { container, size } of containers) {
-            this.linkContainerObserver.observe(container, { childList: true })
-            initialLinks.push(...container.children)
-            const panel = new ThumbnailPanel(this.hostMaps, size)
-            panel.attachTo(container)
-            // Sometimes the container gets replaced with a new one,
-            // use a childList observer on the parent to catch those cases
-            const containerWrapperObserver = new MutationObserver((mutationList) => {
-                for (const mutation of mutationList) {
-                    for (const node of mutation.addedNodes) {
-                        const element = node as HTMLElement
-                        if (element.tagName != "UL") continue
-                        this.linkContainerObserver.observe(element, { childList: true })
-                        panel.attachTo(element)
-                        this.handlePixivLinks(element.children)
-                    }
-                }
-            })
-            containerWrapperObserver.observe(container.parentElement!, { childList: true })
+        // Remove containers which have been removed from the page
+        let outdatedContainerExists = false
+        for (const container of this.observedContainers) {
+            if (container.offsetParent === null) {
+                outdatedContainerExists = true
+                this.observedContainers.delete(container)
+            }
         }
-        this.handlePixivLinks(initialLinks)
+
+        // Manage newly added containers
+        for (const { container, size } of containers) {
+            if (container.offsetParent === null) continue
+            if (this.observedContainers.has(container)) continue
+            this.observedContainers.add(container)
+            if (!outdatedContainerExists) {
+                this.linkContainerObserver.observe(container, { childList: true })
+            }
+            this.manageContainer(container, size)
+        }
+
+        // Disconnect observer if a container was removed and connect remaining
+        if (outdatedContainerExists) {
+            this.linkContainerObserver.disconnect()
+            for (const container of this.observedContainers) {
+                this.linkContainerObserver.observe(container, { childList: true })
+            }
+        }
+    }
+
+    manageContainer(container: HTMLElement, size: ThumbnailSize) {
+        const panel = new ThumbnailPanel(this.hostMaps, size)
+        panel.attachTo(container)
+        // Sometimes the container gets replaced with a new one,
+        // use a childList observer on the parent to catch those cases
+        const containerWrapperObserver = new MutationObserver((mutationList) => {
+            for (const mutation of mutationList) {
+                for (const node of mutation.addedNodes) {
+                    const element = node as HTMLElement
+                    if (element.tagName != "UL") continue
+                    this.linkContainerObserver.observe(element, { childList: true })
+                    panel.attachTo(element)
+                    this.handlePixivLinks(element.children)
+                }
+            }
+        })
+        containerWrapperObserver.observe(container.parentElement!, { childList: true })
+        this.handlePixivLinks(container.children)
     }
 
     update(statusMap: StatusMap) {
@@ -91,6 +115,9 @@ export default class ThumbnailStatus {
             const host = key as HostName
             this.hostMaps[host]!.clear()
         }
+        this.linkContainerObserver.disconnect()
+        this.pixivIdToElements.clear()
+        this.observedContainers.clear()
     }
 
     // Toggle markers on/off 

@@ -1,6 +1,6 @@
 import SettingsManager from "js/settings-manager";
 import browser from "webextension-polyfill";
-import { HostName, StatusMap, PixivId, PostsMap } from "js/types";
+import { HostName, StatusMap, PixivId, PostsMap, UploadExtensionCommunicationError } from "js/types";
 
 type PixivIdToPostIds = { [key in string]: string[] }
 
@@ -9,8 +9,13 @@ interface Post {
     source: string
 }
 
+interface ArtistInfo {
+    name: string
+    isBanned: boolean
+}
+
 // const UPLOAD_EXTENSION = "ilemnfmnoanhiapnbdjolbojmpkbhbnp"
-const UPLOAD_EXTENSION = "akdimecgpicfibabbjalmkaphplbonba"
+const UPLOAD_EXTENSION = "llikndljbekkdmncapkldffgliknjcdc"
 const PIXIV_TABS_KEY = "pixivTabs"
 const StatusMapKeys: { [key in HostName]: string } = {
     [HostName.Gelbooru]: "pixivIdToGelbooruIds",
@@ -38,7 +43,12 @@ async function getPostsForPixivIds(pixivIds: string[], hosts?: HostName[]): Prom
 
 function getPixivIdFromUrl(urlString: string): string {
     if (!urlString) return ""
-    const url = new URL(urlString)
+    let url
+    try {
+        url = new URL(urlString)
+    } catch (error) {
+        return ""
+    }
     if (!url) return ""
     if (url.host === "www.pixiv.net") {
         if (url.searchParams.has("illust_id")) {
@@ -63,7 +73,7 @@ async function getPostsForArtistTag(artistTag: string, host: HostName): Promise<
             args: { tags: [artistTag], host }
         })
     } catch (error) {
-        throw new Error("Query failed.")
+        throw new UploadExtensionCommunicationError()
     }
     if (response.error) throw new Error(response.error)
     const pixivIdToPostIds: PixivIdToPostIds = {}
@@ -80,32 +90,32 @@ async function getPostsForArtistTag(artistTag: string, host: HostName): Promise<
     return pixivIdToPostIds
 }
 
-async function getArtistTags(url: string): Promise<string[]> {
-    let response: { error?: string, html: string }
-    response = await browser.runtime.sendMessage(UPLOAD_EXTENSION, {
-        type: "query-artist-database",
-        args: { url }
-    })
+async function searchForArtists(url: string): Promise<ArtistInfo[]> {
+    let response: { error?: string, artists: ArtistInfo[] }
+    try {
+        response = await browser.runtime.sendMessage(UPLOAD_EXTENSION, {
+            type: "query-artist-database",
+            args: { url }
+        })
+    } catch (error) {
+        throw new UploadExtensionCommunicationError()
+    }
     if (response.error) throw new Error(response.error)
-    // Extract artist tags from the HTML document
-    // (NOTE: DOMParser is not available in service worker in manifest v3,
-    // use regex instead and risk the apocalypse)
-    const regex = /<a class="tag-type-1".*?>([^<]*)<\/a>/g
-    return [...response.html.matchAll(regex)].map(match => match[1].trim())
+    return response.artists
 }
 
 async function handleArtistStatusCheck(url: string, hosts: HostName[]) {
-    const artistTags = await getArtistTags(url)
-    if (artistTags.length === 0) {
+    const artistInfos = await searchForArtists(url)
+    if (artistInfos.length === 0) {
         return { pixivIds: [], numPosts: {} }
     }
     const pixivIdSet = new Set<PixivId>()
     const numPosts: { [key in HostName]?: number } = {}
     const statusMap: StatusMap = {}
-    for (const artistTag of artistTags) {
+    for (const { name, isBanned } of artistInfos) {
         for (const host of hosts) {
             numPosts[host] = 0
-            const artistStatusMap = await getPostsForArtistTag(artistTag, host)
+            const artistStatusMap = await getPostsForArtistTag(name, host)
             for (const pixivId in artistStatusMap) {
                 const postIds = artistStatusMap[pixivId]
                 if (!(pixivId in statusMap)) {

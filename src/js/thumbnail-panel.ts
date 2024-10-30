@@ -59,13 +59,18 @@ export default class ThumbnailPanel {
             if (this.wrapper.contains(event.target as HTMLElement)) return
             this.hide()
         }, { capture: true })
+
+        // Clicking the panel shouldn't do anything
+        this.wrapper.addEventListener("click", (event) => {
+            event.stopImmediatePropagation()
+        })
     }
 
     attachTo(thumbnailContainer: HTMLElement) {
-        // Ctrl + click an artwork link to display the panel
+        // Ctrl + alt + click an artwork link to display the panel
         thumbnailContainer.addEventListener("click", (event) => {
             if (!event.ctrlKey || !event.altKey) return
-            const thumbnail = (event.target as HTMLElement).closest("[type='illust']")
+            const thumbnail = (event.target as HTMLElement).closest(".handled")
             if (thumbnail === null) return
             this.display(thumbnail as HTMLElement)
             event.stopImmediatePropagation()
@@ -111,12 +116,14 @@ export default class ThumbnailPanel {
             postIds.forEach(id => createPostLink(this.linkContainer, id, host))
         }
         thumbnail.classList.add("showing-thumbnail-panel")
-        thumbnail.appendChild(this.wrapper)
+        linkElement.parentElement!.prepend(this.wrapper)
     }
 
     private hide() {
         this.currentPixivId = ""
-        this.wrapper.parentElement!.classList.remove("showing-thumbnail-panel")
+        const thumbnailElement = this.wrapper.closest(".showing-thumbnail-panel")
         this.wrapper.remove()
+        if (thumbnailElement === null) return
+        thumbnailElement.classList.remove("showing-thumbnail-panel")
     }
 }

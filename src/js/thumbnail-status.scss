@@ -1,9 +1,19 @@
 .checked-not-uploaded, .checked-mixed, .checked-uploaded {
-    div[type="illust"] {
+    & > div {
+        // Required for absolute positioning of the thumbnail panel
+        position: relative;
+    }
+
+    // The thumbnails contain a div element where the properties "mask-image"
+    // and "overflow" cause the shadow of the thumbnail-status to get hidden.
+    // Depending on where the thumbnail is located (artwork page, listing, etc.),
+    // it could be the second or third child, so cover both cases.
+    & > div > div, & > div > div > div {
         mask-image: unset !important;
         -webkit-mask-image: unset !important;
         overflow: visible !important;
     }
+
     div[radius] {
         outline: 1px solid #eee;  // firebrick; // blue;
         box-shadow: 0 0 5px 4px var(--highlight-color);
