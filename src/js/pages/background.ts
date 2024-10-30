@@ -14,8 +14,7 @@ interface ArtistInfo {
     isBanned: boolean
 }
 
-// const UPLOAD_EXTENSION = "ilemnfmnoanhiapnbdjolbojmpkbhbnp"
-const UPLOAD_EXTENSION = "llikndljbekkdmncapkldffgliknjcdc"
+const UPLOAD_EXTENSION = "ilemnfmnoanhiapnbdjolbojmpkbhbnp"
 const PIXIV_TABS_KEY = "pixivTabs"
 const StatusMapKeys: { [key in HostName]: string } = {
     [HostName.Gelbooru]: "pixivIdToGelbooruIds",
