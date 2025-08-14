@@ -22,7 +22,7 @@ const stickyParentObserver = new MutationObserver(() => {
 })
 
 function applySettings(changedSettings?: Set<keyof Settings>) {
-    const root = document.getElementById("root") as HTMLElement
+    const root = document.getElementById("__next") as HTMLElement
     const mainElement = document.querySelector("main")
     const hasChanged = (key: keyof Settings) => !changedSettings || changedSettings.has(key)
     if (hasChanged("hideRelatedPixivPics")) {
@@ -42,8 +42,9 @@ function applySettings(changedSettings?: Set<keyof Settings>) {
         }
     }
     if (hasChanged("hidePixivHeader")) {
-        if (root.children[1]) {
-            const header = root.children[1].querySelector(":scope > div > div > div[style*='position: static']") as HTMLElement | null
+        const headerWrapper = root.querySelector("div[style^='position:static']")
+        if (headerWrapper) {
+            const header = headerWrapper.parentElement as HTMLElement | null
             if (header) {
                 header.style.display = currentSettings.hidePixivHeader ? "none" : "block"
             }
@@ -56,7 +57,7 @@ function applySettings(changedSettings?: Set<keyof Settings>) {
         if (stickyParentElement) {
             stickyParent = stickyParentElement as HTMLElement
             stickyParentObserver.observe(stickyParent, { childList: true })
-            const stickyElement = stickyParent.children[4]
+            const stickyElement = stickyParent.children[5]
             if (stickyElement) {
                 (stickyElement as HTMLElement).style.position = "static"
             }
@@ -303,7 +304,7 @@ const listingPageObserver = new MutationObserver(mutationList => {
                 if (element.tagName === "UL") {
                     listing = element
                 } else if (element.tagName === "LI") {
-                    if (!element.hasAttribute("size")) continue
+                    // if (!element.hasAttribute("size")) continue
                     listing = element.closest("ul") as HTMLElement | null
                     if (listing === null) continue
                 } else {
@@ -337,7 +338,7 @@ function main() {
     postPageObserver.disconnect()
     thumbnailStatus.clear()
     artistCheck.clear()
-    const root = document.getElementById("root") as HTMLElement
+    const root = document.getElementById("__next") as HTMLElement
     if (pageType === "post") {
         postPageObserver.observe(root, { childList: true, subtree: true })
     } else if (pageType === "listing" || pageType === "tag") {

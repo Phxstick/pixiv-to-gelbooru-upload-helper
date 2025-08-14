@@ -1,3 +1,5 @@
+@use "sass:color";
+
 .artwork-overlay {
     display: flex;
     justify-content: center;
@@ -137,7 +139,7 @@
         transition: color 0.2s;
 
         &.upload-prepared {
-            color: lighten(forestgreen, 3%);
+            color: color.adjust(forestgreen, $lightness: 3%, $space: hsl);
         }
         &.already-uploaded {
             color: #006ffa;

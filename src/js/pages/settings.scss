@@ -1,3 +1,5 @@
+@use "sass:color";
+
 body {
   padding: 20px;
   height: unset;  // Override Semantic UI's unnecessary "height: 100%"
@@ -26,7 +28,7 @@ body {
     --toggle-button-color: #aaa;
     --toggle-background: #444;
     --toggle-background-hover: #606060;
-    --toggle-background-enabled: #{darken(#2185d0, 12%)};
+    --toggle-background-enabled: #{color.adjust(#2185d0, $lightness: -12%, $space: hsl)};
 
     --button-color: #bbb;
     --button-background: #444;

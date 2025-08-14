@@ -14,7 +14,10 @@ interface ArtistInfo {
     isBanned: boolean
 }
 
-const UPLOAD_EXTENSION = "ilemnfmnoanhiapnbdjolbojmpkbhbnp"
+const UPLOAD_EXTENSION_STORE_ID = "ilemnfmnoanhiapnbdjolbojmpkbhbnp"
+const UPLOAD_EXTENSION = PRODUCTION ? UPLOAD_EXTENSION_STORE_ID :
+    (UPLOAD_EXTENSION_ID || UPLOAD_EXTENSION_STORE_ID)
+
 const PIXIV_TABS_KEY = "pixivTabs"
 const StatusMapKeys: { [key in HostName]: string } = {
     [HostName.Gelbooru]: "pixivIdToGelbooruIds",
@@ -213,7 +216,7 @@ async function handleImageDownload(url: string, port: browser.Runtime.Port) {
     const reader = imgResponse.body!.getReader()
     const totalSize = parseInt(imgResponse.headers.get("Content-Length") || "0")
     port.postMessage({ type: "started", data: { totalSize }})
-    const imageParts: Uint8Array[] = []
+    const imageParts: Uint8Array<ArrayBuffer>[] = []
     let currentSize = 0
     while (true) {
         const { done, value } = await reader.read()

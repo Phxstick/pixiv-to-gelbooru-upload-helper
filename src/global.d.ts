@@ -1,16 +1,12 @@
-import { Storage } from "webextension-polyfill";
-
 declare const chrome: any;
 
-declare global {
-    const chrome: any
-    interface Window {
-        $: JQueryStatic,
-        jQuery: JQueryStatic
-        chrome: any
-    }
-}
+declare var jQuery: JQueryStatic
+declare var $: JQueryStatic
+declare var chrome: any
 
+// Defined in webpack.config.js
+declare var PRODUCTION: boolean;
+declare var UPLOAD_EXTENSION_ID: string;
 
 // Remove this when Semantic UI typings are updated
 declare namespace SemanticUI {
@@ -24,18 +20,6 @@ declare namespace SemanticUI {
         type Param = Partial<_Impl> & {
             searchOnFocus: boolean
             fullTextSearch: boolean
-        }
-    }
-}
-
-// Following is only implemented in Chrome
-declare module "webextension-polyfill" {
-    namespace Storage {
-        interface SessionStorageArea extends StorageArea {
-            QUOTA_BYTES: 1048576;
-        }
-        interface Static {
-            session: SessionStorageArea;
         }
     }
 }
