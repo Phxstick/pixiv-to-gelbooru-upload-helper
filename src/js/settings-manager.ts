@@ -10,6 +10,7 @@ class SettingsManager {
         showThumbnailStatus: true,
         showPostScore: false,
         hideRelatedPixivPics: false,
+        hideOtherPicsByArtist: false,
         hidePixivHeader: false,
         enabledHosts: [HostName.Gelbooru],
         defaultHost: HostName.Gelbooru
@@ -33,6 +34,10 @@ class SettingsManager {
             hideRelatedPixivPics: {
                 type: "boolean",
                 text: "Hide related Pixiv artworks at the bottom of artwork pages"
+            },
+            hideOtherPicsByArtist: {
+                type: "boolean",
+                text: "Hide other artworks by the same artist at the bottom of artwork pages"
             },
             hidePixivHeader: {
                 type: "boolean",

@@ -43,7 +43,7 @@ export default class ArtistCheck {
 
             // Ctrl + alt + click element to search for posts
             element.addEventListener("click", (event) => {
-                if (!event.ctrlKey || !event.altKey) return
+                if (!(event.ctrlKey || event.metaKey) || !event.altKey) return
                 event.preventDefault()
                 event.stopImmediatePropagation()
                 this.handleSearch(event, artistUrl)
@@ -53,7 +53,7 @@ export default class ArtistCheck {
             let hovering = false
             element.addEventListener("mouseenter", (event) => {
                 hovering = true
-                if (event.ctrlKey && event.altKey) {
+                if ((event.ctrlKey || event.metaKey) && event.altKey) {
                     element.classList.add("hovering")
                 }
             })
@@ -63,12 +63,12 @@ export default class ArtistCheck {
             })
             const keyDownListener = (event: KeyboardEvent) => {
                 if (!hovering) return
-                if (event.ctrlKey && event.altKey) {
+                if ((event.ctrlKey || event.metaKey) && event.altKey) {
                     element.classList.add("hovering")
                 }
             }
             const keyUpListener = (event: KeyboardEvent) => {
-                if (!event.ctrlKey || !event.altKey) {
+                if (!(event.ctrlKey || event.metaKey) || !event.altKey) {
                     element.classList.remove("hovering")
                 }
             }

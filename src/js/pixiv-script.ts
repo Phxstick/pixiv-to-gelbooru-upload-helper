@@ -6,6 +6,12 @@ import SettingsManager from "./settings-manager";
 import { PixivTags, Settings, HostName, ThumbnailSize } from "./types";
 import "./pixiv-script.scss"
 
+enum Container {
+    AdjacentPics = "adjacent-pics",
+    ArtistPics = "pics-by-artist",
+    RelatedPics = "related-pics"
+}
+
 const thumbnailStatus = new ThumbnailStatus()
 const artistCheck =  new ArtistCheck()
 
@@ -26,8 +32,7 @@ function applySettings(changedSettings?: Set<keyof Settings>) {
     const mainElement = document.querySelector("main")
     const hasChanged = (key: keyof Settings) => !changedSettings || changedSettings.has(key)
     if (hasChanged("hideRelatedPixivPics")) {
-        const listElements = [...root.querySelectorAll("aside ul")] as HTMLElement[]
-        const relatedPicsContainer = listElements[listElements.length - 1]
+        const relatedPicsContainer = document.getElementById(Container.RelatedPics)
         if (relatedPicsContainer) {
             const asideElement = relatedPicsContainer.closest("aside")
             if (asideElement) {
@@ -38,6 +43,22 @@ function applySettings(changedSettings?: Set<keyof Settings>) {
             }
             if (!currentSettings.hideRelatedPixivPics) {
                 thumbnailStatus.manage([{ container: relatedPicsContainer, size: "large" }])
+            }
+        }
+    }
+    if (hasChanged("hideOtherPicsByArtist")) {
+        const picsByArtistContainer = document.getElementById(Container.ArtistPics)
+        const adjacentPicsContainer = document.getElementById(Container.AdjacentPics)
+        if (picsByArtistContainer) {
+            picsByArtistContainer.parentElement!.parentElement!.classList.toggle("hidden", currentSettings.hideOtherPicsByArtist)
+            if (!currentSettings.hideOtherPicsByArtist) {
+                thumbnailStatus.manage([{ container: picsByArtistContainer, size: "medium" }])
+            }
+        }
+        if (adjacentPicsContainer) {
+            adjacentPicsContainer.closest("aside")!.classList.toggle("hidden", currentSettings.hideOtherPicsByArtist)
+            if (!currentSettings.hideOtherPicsByArtist) {
+                thumbnailStatus.manage([{ container: adjacentPicsContainer, size: "small" }])
             }
         }
     }
@@ -108,6 +129,67 @@ async function updateSettings(settings: Settings): Promise<Set<keyof Settings>> 
     return changedSettings
 }
 
+/**
+ * Convert content of given HTML element to a string formatted according to
+ * Danbooru's DText specification.
+ */
+function parseDescription(element: ChildNode): string {
+    const descriptionParts = []
+    for (const childNode of element.childNodes) {
+        if (childNode.nodeName === "#text") {
+            descriptionParts.push(childNode.textContent)
+        } else if (childNode.nodeName === "BR") {
+            descriptionParts.push("\n")
+        } else if (childNode.nodeName === "A") {
+            const linkElement = childNode as HTMLAnchorElement
+            const linkText = linkElement.textContent
+            let linkUrl = linkElement.href
+            const pixivJumpPrefix = "https://www.pixiv.net/jump.php?"
+            if (linkUrl.startsWith(pixivJumpPrefix)) {
+                linkUrl = decodeURIComponent(linkUrl.slice(pixivJumpPrefix.length))
+            }
+            descriptionParts.push(
+                linkText === linkUrl ? `<${linkUrl}>` : `[${linkText}](${linkUrl})`)
+        } else if (childNode.nodeName === "STRONG") {
+            descriptionParts.push("[b]" + parseDescription(childNode) + "[/b]")
+        } else {
+            throw new Error("Unsupported element type in description: " + childNode.nodeName)
+        }
+    }
+    return descriptionParts.join("")
+}
+
+function getTitleAndDescription(): { title?: string, description?: string } {
+    const data: { title?: string, description?: string } = {}
+
+    // Find wrapper element (search for <footer> because tags element should always exist)
+    const footerElements = document.querySelectorAll("footer")
+    if (footerElements.length !== 1) {
+        throw new Error("Page doesn't contain exactly one <footer> element")
+    }
+    const artworkDetailsWrapper = footerElements[0].parentElement!
+
+    // Get title
+    const titleElements = artworkDetailsWrapper.querySelectorAll("h1")
+    if (titleElements.length > 1) {
+        throw new Error("Artwork details wrapper contains more than one <h1> element")
+    }
+    if (titleElements.length === 1) {
+        data.title = titleElements[0].textContent
+    }
+
+    // Get description
+    const paragraphElements = artworkDetailsWrapper.querySelectorAll("p")
+    if (paragraphElements.length > 1) {
+        throw new Error("Artwork details wrapper contains more than one <p> element")
+    }
+    if (paragraphElements.length === 1) {
+        data.description = parseDescription(paragraphElements[0])
+    }
+    
+    return data
+}
+
 function gatherPixivTags(): PixivTags {
     const tagWrappers = document.querySelectorAll("footer ul > li > span")
     const pixivTags: PixivTags = {}
@@ -129,7 +211,7 @@ function gatherPixivTags(): PixivTags {
 
 // Ctrl + click an image to add the original version of it to an upload tab 
 document.addEventListener("click", async (event) => {
-    if (!event.ctrlKey) return
+    if (!event.ctrlKey && !event.metaKey) return
     const target = event.target as HTMLElement
     if (target.tagName !== "IMG") return
     let img = target as HTMLImageElement
@@ -169,8 +251,18 @@ document.addEventListener("click", async (event) => {
     }
 
     // Otherwise create new overlay, download and check image
-    const pixivTags = gatherPixivTags()
-    const artworkOverlay = new ArtworkOverlay(img, url, pixivTags)
+    const tags = gatherPixivTags()
+    let title: string | undefined
+    let description: string | undefined
+    try {
+        ({ title, description } = getTitleAndDescription());
+    } catch (error) {
+        const message = error instanceof Error ? error.message : "<no message>"
+        if (!PRODUCTION) {
+            window.alert("Error parsing title or description: " + message)
+        }
+    }
+    const artworkOverlay = new ArtworkOverlay(img, url, { tags, title, description })
     artworkOverlay.setHosts(currentSettings.enabledHosts as HostName[])
     artworkOverlay.show()
     if (event.shiftKey) {
@@ -229,19 +321,30 @@ function handleArtworkPage(navElements: HTMLElement[]) {
     ArtworkOverlay.clear()
 
     const adjacentPicsContainer = navElements[1] as HTMLElement
+    if (!adjacentPicsContainer.id)
+        adjacentPicsContainer.id = Container.AdjacentPics
     const picsByArtistContainer = navElements[0].children[0] as HTMLElement
+    if (!picsByArtistContainer.id)
+        picsByArtistContainer.id = Container.ArtistPics
     const listElements = [...document.querySelectorAll("aside ul")] as HTMLElement[]
     const relatedPicsContainer = listElements[listElements.length - 1]
+    if (!relatedPicsContainer.id)
+        relatedPicsContainer.id = Container.RelatedPics
     settingsLoaded.then(() => {
         applySettings()
-        const containers: { container: HTMLElement, size: ThumbnailSize }[] = [
-            { container: adjacentPicsContainer, size: "small" },
-            { container: picsByArtistContainer, size: "medium" },
-        ]
+        const containers: { container: HTMLElement, size: ThumbnailSize }[] = []
+        if (!currentSettings.hideOtherPicsByArtist) {
+            containers.push(
+                { container: adjacentPicsContainer, size: "small" },
+                { container: picsByArtistContainer, size: "medium" }
+            )
+        }
         if (!currentSettings.hideRelatedPixivPics) {
             containers.push({ container: relatedPicsContainer, size: "large" })
         }
-        thumbnailStatus.manage(containers)
+        if (containers.length) {
+            thumbnailStatus.manage(containers)
+        }
     })
 
     const picsByArtistWrapper = navElements[0].parentElement!.parentElement!

@@ -1,6 +1,7 @@
 export interface Settings {
     showThumbnailStatus: boolean
     hideRelatedPixivPics: boolean
+    hideOtherPicsByArtist: boolean
     hidePixivHeader: boolean
     showPostScore: boolean
     enabledHosts: string[]

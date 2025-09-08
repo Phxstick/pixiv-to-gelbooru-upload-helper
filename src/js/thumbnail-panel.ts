@@ -69,7 +69,7 @@ export default class ThumbnailPanel {
     attachTo(thumbnailContainer: HTMLElement) {
         // Ctrl + alt + click an artwork link to display the panel
         thumbnailContainer.addEventListener("click", (event) => {
-            if (!event.ctrlKey || !event.altKey) return
+            if (!(event.ctrlKey || event.metaKey) || !event.altKey) return
             const thumbnail = (event.target as HTMLElement).closest(".handled")
             if (thumbnail === null) return
             this.display(thumbnail as HTMLElement)

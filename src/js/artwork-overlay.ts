@@ -4,6 +4,12 @@ import { PixivTags, HostName, UploadStatus, BooruPost, PostsMap } from "./types"
 import { createPostLink, E } from "./utility"
 import "./artwork-overlay.scss"
 
+interface ArtworkDetails {
+    tags: PixivTags
+    title?: string
+    description?: string
+}
+
 interface CheckResult {
     postIds?: number[]
     error?: string
@@ -13,7 +19,7 @@ interface CheckResult {
 export default class ArtworkOverlay {
     private readonly img: HTMLImageElement
     private readonly url: string
-    private readonly pixivTags: PixivTags
+    private readonly details: ArtworkDetails
 
     // Settings
     private hosts: HostName[] = []
@@ -153,10 +159,10 @@ export default class ArtworkOverlay {
         ArtworkOverlay.showPostScores = enabled
     }
 
-    constructor(img: HTMLImageElement, url: string, pixivTags: PixivTags) {
+    constructor(img: HTMLImageElement, url: string, details: ArtworkDetails) {
         this.img = img
         this.url = url
-        this.pixivTags = pixivTags
+        this.details = details
 
         this.reset()
         this.overlayContainer.style.display = "none"
@@ -378,14 +384,17 @@ export default class ArtworkOverlay {
     }
 
     private async conductCheck(dataUrl: string, host: HostName): Promise<CheckResult> {
+        const { tags, title, description } = this.details
         try {
             return await browser.runtime.sendMessage({
                 type: "prepare-upload",
                 data: {
+                    host,
                     file: dataUrl,
                     url: this.url,
-                    pixivTags: this.pixivTags,
-                    host
+                    pixivTags: tags,
+                    title,
+                    description
                 }
             })
         } catch (error) {
