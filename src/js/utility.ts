@@ -174,8 +174,9 @@ export function createPostLink(
     })] : text ? [E("span", {}, text)] : [E("img", { src: iconUrl })]
     if (post && showScore) {
         const score = Math.max(post.score, post.favCount || 0)
-        const upvotesString = text ? `(${score}🠝)` : `${score}🠝`
-        content.push(E("span", { class: "upvotes" }, upvotesString))
+        const scoreString = `${score} \u{21E7}`
+        const textContent = text ? `(${scoreString})` : scoreString 
+        content.push(E("span", { class: "upvotes" }, textContent))
     }
     let href: string
     if (host === HostName.Gelbooru) {
@@ -207,5 +208,21 @@ export async function catchError<T>(func: Func<T>): Promise<ResultAndError<T>> {
         } else {
             return [null, new Error("Internal error")]
         }
+    }
+}
+
+export function isEqual<T>(value1: T, value2: T): boolean {
+    if (Array.isArray(value1)) {
+        const a1 = value1 as Array<any>
+        const a2 = value2 as Array<any>
+        if (a1.length !== a2.length) return false
+        for (let i = 0; i < a1.length; ++i) {
+            if (a1[i] !== a2[i]) {
+                return false
+            }
+        }
+        return true
+    } else {
+        return value1 === value2
     }
 }

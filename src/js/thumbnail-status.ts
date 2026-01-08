@@ -54,6 +54,8 @@ export default class ThumbnailStatus {
     })
 
     manage(containers: { container: HTMLElement, size: ThumbnailSize }[]) {
+        if (containers.length === 0) return 
+        
         // Remove containers which have been removed from the page
         let outdatedContainerExists = false
         for (const container of this.observedContainers) {
@@ -155,7 +157,12 @@ export default class ThumbnailStatus {
         }
         const newPixivIds: string[] = []
         for (const element of linkElements) {
-            const pixivId = this.registerPixivLink(element as HTMLElement)
+            const htmlElement = element as HTMLElement
+            const aElement = htmlElement.querySelector("a")
+            if (!aElement) continue
+            if (aElement.href.includes("booth") || aElement.href.includes("sketch"))
+                continue
+            const pixivId = this.registerPixivLink(htmlElement)
             if (typeof pixivId === "string") {
                 if (isCheckedPixivId(pixivId)) {
                     this.updateLinkElements(pixivId)
@@ -276,8 +283,13 @@ export default class ThumbnailStatus {
         let aElement = linkElement.querySelector("a")
         if (aElement !== null) {
             const pixivId = aElement.dataset.gtmValue
-            if (!pixivId)
-                throw new Error("Couldn't find Pixiv ID for link element.")
+            if (!pixivId) {
+                if (!PRODUCTION) {
+                    console.log("Missing pixiv ID:", linkElement)
+                    alert("Pixiv ID extraction error.")
+                }
+                throw new Error("Couldn't find Pixiv ID for link element")
+            }
             return pixivId
         }
         // <a> element in subtree of a link might not be present immediately,

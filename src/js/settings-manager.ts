@@ -37,7 +37,7 @@ class SettingsManager {
             },
             hideOtherPicsByArtist: {
                 type: "boolean",
-                text: "Hide other artworks by the same artist at the bottom of artwork pages"
+                text: "Hide other artworks by the same artist"
             },
             hidePixivHeader: {
                 type: "boolean",

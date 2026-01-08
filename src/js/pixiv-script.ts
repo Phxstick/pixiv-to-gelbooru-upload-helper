@@ -4,6 +4,7 @@ import ArtistCheck from "./artist-check";
 import ArtworkOverlay from "./artwork-overlay";
 import SettingsManager from "./settings-manager";
 import { PixivTags, Settings, HostName, ThumbnailSize } from "./types";
+import { isEqual } from "./utility"
 import "./pixiv-script.scss"
 
 enum Container {
@@ -26,6 +27,18 @@ const stickyParentObserver = new MutationObserver(() => {
         (stickyElement as HTMLElement).style.position = "static"
     }
 })
+
+// Display an alert if an error occurs in the given function in development mode
+function announceError(func: Function) {
+    try {
+        func()
+    } catch (e) {
+        if (PRODUCTION) return
+        const message = e instanceof Error ? ` (${e.message})` : ""
+        window.alert(`Error occurred!${message}`)
+        throw e
+    }
+}
 
 function applySettings(changedSettings?: Set<keyof Settings>) {
     const root = document.getElementById("__next") as HTMLElement
@@ -96,22 +109,6 @@ function applySettings(changedSettings?: Set<keyof Settings>) {
     }
     if (hasChanged("defaultHost")) {
         ArtworkOverlay.updateDefaultHost(currentSettings.defaultHost as HostName)
-    }
-}
-
-function isEqual<T>(value1: T, value2: T): boolean {
-    if (Array.isArray(value1)) {
-        const a1 = value1 as Array<any>
-        const a2 = value2 as Array<any>
-        if (a1.length !== a2.length) return false
-        for (let i = 0; i < a1.length; ++i) {
-            if (a1[i] !== a2[i]) {
-                return false
-            }
-        }
-        return true
-    } else {
-        return value1 === value2
     }
 }
 
@@ -209,48 +206,63 @@ function gatherPixivTags(): PixivTags {
     return pixivTags
 }
 
+function getPreviewImage(clickedImg: HTMLImageElement): HTMLImageElement | null {
+    // Check if the clicked image is already a preview
+    if (!clickedImg.src.includes("img-original")
+            || clickedImg.parentElement!.tagName === "A")
+        return clickedImg
+
+    // Find a preview if the given image is an original version
+    clickedImg.click()  // Close original image
+
+    // IMPORTANT: the preview and original may have different file types,
+    // e.g. JPG and PNG, so a prefix-search must be used instead of equality
+    const previewUrl = clickedImg.src.replace("img-original", "img-master")
+        .replace(/_p(\d+)\./, "_p$1_master1200.").slice(0, -4)
+    const previewImage = document.querySelector(`img[src^='${previewUrl}']`) as HTMLImageElement | null
+    if (previewImage) return previewImage
+
+    // Artwork can be a long image which is a concatention of smaller images,
+    // in which case a less specific regex must be used find preview images
+    const imageIdentifierMatch = clickedImg.src.match(/\/(\d+_p\d+)/)
+    if (!imageIdentifierMatch) return null
+    const imageIdentifier = imageIdentifierMatch[1]
+    return document.querySelector(`img[src*='${imageIdentifier}']`) as HTMLImageElement | null
+}
+
 // Ctrl + click an image to add the original version of it to an upload tab 
-document.addEventListener("click", async (event) => {
+async function artworkCheckListener(event: MouseEvent) {
     if (!event.ctrlKey && !event.metaKey) return
     const target = event.target as HTMLElement
     if (target.tagName !== "IMG") return
-    let img = target as HTMLImageElement
+    const clickedImg = target as HTMLImageElement
 
-    // Find URL of the original version of the clicked image
-    let url: string
-    if (img.src.includes("img-original")) {
-        url = img.src
-        // Close the view with the original-size image
-        img.click()
-        // Add overlay to the resized preview instead (NOTE: the preview and original may have
-        // different file types, e.g. JPG and PNG, so use a prefix-search to find preview img)
-        const previewUrl = url.replace("img-original", "img-master")
-            .replace(/_p(\d+)\./, "_p$1_master1200.").slice(0, -4)
-        const previewImage = document.querySelector(`img[src^='${previewUrl}']`)
-        if (previewImage === null) return
-        img = previewImage as HTMLImageElement
-    } else if (img.parentElement) {
-        const href = img.parentElement.getAttribute("href")
-        if (href !== null && href.includes("img-original")) {
-            url = href
-        } else {
-            return
-        }
-    } else {
-        return
-    }
+    // Don't trigger on thumbnails
+    if (clickedImg.src.includes("custom-thumb")) return
+    if (clickedImg.src.includes("square")) return
+
+    // Get preview image
+    const previewImage = getPreviewImage(clickedImg)
+    if (!previewImage) return
     event.stopPropagation()
     event.preventDefault()
 
+    // Get URL of original image and container of preview image
+    const url = previewImage.parentElement!.getAttribute("href")
+    if (url === null || !url.includes("img-original")) return
+    const imgContainer = previewImage.closest(".gtm-medium-work-expanded-view") as HTMLElement | null
+                         || previewImage.parentElement!.parentElement!
+    if (!imgContainer) return
+
     // If this image was already handled before, display existing overlay
-    const existingOverlay = ArtworkOverlay.getOverlay(img.parentElement!)
+    const existingOverlay = ArtworkOverlay.getOverlay(imgContainer)
     if (existingOverlay !== undefined) {
         existingOverlay.show()
         if (event.shiftKey) existingOverlay.selectHost()
         return
     }
 
-    // Otherwise create new overlay, download and check image
+    // Extract artwork title, description and tags from the page
     const tags = gatherPixivTags()
     let title: string | undefined
     let description: string | undefined
@@ -262,7 +274,9 @@ document.addEventListener("click", async (event) => {
             window.alert("Error parsing title or description: " + message)
         }
     }
-    const artworkOverlay = new ArtworkOverlay(img, url, { tags, title, description })
+
+    // Create new overlay, download and check image
+    const artworkOverlay = new ArtworkOverlay(imgContainer, url, { tags, title, description })
     artworkOverlay.setHosts(currentSettings.enabledHosts as HostName[])
     artworkOverlay.show()
     if (event.shiftKey) {
@@ -271,7 +285,8 @@ document.addEventListener("click", async (event) => {
         artworkOverlay.check(event.altKey ?
             "all-hosts" : currentSettings.defaultHost as HostName)
     }
-}, { capture: true })
+}
+const artworkCheckListenerArgs = ["click", artworkCheckListener, { capture: true }] as const
 
 // When a pixiv post from a different artist is clicked, the container with pictures
 // from the current artist will be replaced, observe an ancestor to handle this case
@@ -283,7 +298,7 @@ const picsByArtistWrapperObserver = new MutationObserver(mutationList => {
                 if (element.querySelector("nav") !== null) {
                     const navElements = [...document.querySelectorAll("nav")!]
                     thumbnailStatus.clear()
-                    handleArtworkPage(navElements)
+                    announceError(() => handleArtworkPage(navElements))
                 }
             }
         }
@@ -318,33 +333,34 @@ const listingWrapperObserver = new MutationObserver(mutationList => {
 // }
 
 function handleArtworkPage(navElements: HTMLElement[]) {
+    document.removeEventListener(...artworkCheckListenerArgs)
+    document.addEventListener(...artworkCheckListenerArgs)
     ArtworkOverlay.clear()
 
     const adjacentPicsContainer = navElements[1] as HTMLElement
-    if (!adjacentPicsContainer.id)
+    if (adjacentPicsContainer && !adjacentPicsContainer.id)
         adjacentPicsContainer.id = Container.AdjacentPics
     const picsByArtistContainer = navElements[0].children[0] as HTMLElement
-    if (!picsByArtistContainer.id)
+    if (picsByArtistContainer && !picsByArtistContainer.id)
         picsByArtistContainer.id = Container.ArtistPics
     const listElements = [...document.querySelectorAll("aside ul")] as HTMLElement[]
     const relatedPicsContainer = listElements[listElements.length - 1]
-    if (!relatedPicsContainer.id)
+    if (relatedPicsContainer && !relatedPicsContainer.id)
         relatedPicsContainer.id = Container.RelatedPics
     settingsLoaded.then(() => {
         applySettings()
         const containers: { container: HTMLElement, size: ThumbnailSize }[] = []
         if (!currentSettings.hideOtherPicsByArtist) {
-            containers.push(
-                { container: adjacentPicsContainer, size: "small" },
-                { container: picsByArtistContainer, size: "medium" }
-            )
+            if (adjacentPicsContainer)
+                containers.push({ container: adjacentPicsContainer, size: "small" })
+            if (picsByArtistContainer)
+                containers.push({ container: picsByArtistContainer, size: "medium" })
         }
         if (!currentSettings.hideRelatedPixivPics) {
-            containers.push({ container: relatedPicsContainer, size: "large" })
+            if (relatedPicsContainer)
+                containers.push({ container: relatedPicsContainer, size: "large" })
         }
-        if (containers.length) {
-            thumbnailStatus.manage(containers)
-        }
+        thumbnailStatus.manage(containers)
     })
 
     const picsByArtistWrapper = navElements[0].parentElement!.parentElement!
@@ -386,7 +402,7 @@ function handleListingPage(listing: HTMLElement) {
     }
 }
 
-// Pixiv content is loaded dynamically by scripts, so use  observers
+// Pixiv content is loaded dynamically by scripts, so use observers
 // to wait for the required elements to appear before running other code
 const postPageObserver = new MutationObserver((mutationList) => {
     // Some pages contain an additional hidden nav element, ignore that one
@@ -395,7 +411,7 @@ const postPageObserver = new MutationObserver((mutationList) => {
         .filter(el => el.classList.length >= 2)
     if (navElements.length < 2) return
     postPageObserver.disconnect()
-    handleArtworkPage(navElements)
+    announceError(() => handleArtworkPage(navElements))
 })
 
 const listingPageObserver = new MutationObserver(mutationList => {
@@ -415,7 +431,7 @@ const listingPageObserver = new MutationObserver(mutationList => {
                 }
                 if (knownListings.has(listing)) continue
                 knownListings.add(listing)
-                handleListingPage(listing)
+                announceError(() => handleListingPage(listing))
             }
         }
     }
@@ -441,7 +457,10 @@ function main() {
     postPageObserver.disconnect()
     thumbnailStatus.clear()
     artistCheck.clear()
+    document.removeEventListener(...artworkCheckListenerArgs)
     const root = document.getElementById("__next") as HTMLElement
+    // Root doesn't exist on 404 pages
+    if (!root) return
     if (pageType === "post") {
         postPageObserver.observe(root, { childList: true, subtree: true })
     } else if (pageType === "listing" || pageType === "tag") {

@@ -17,7 +17,9 @@ interface CheckResult {
 }
 
 export default class ArtworkOverlay {
-    private readonly img: HTMLImageElement
+    private readonly imgElements: HTMLImageElement[]
+    private readonly imgContainer: HTMLElement
+
     private readonly url: string
     private readonly details: ArtworkDetails
 
@@ -54,11 +56,14 @@ export default class ArtworkOverlay {
         this.uploadPageButton,
         this.postLinksContainer,
     ])
-    private readonly overlayContainer = E("div", { class: "artwork-overlay" }, [
-        this.imageFilter,
+    private readonly contentWrapper = E("div", { class: "content-wrapper" }, [
         this.selectHostWrapper,
         this.singleStatusContainer,
         this.multiStatusContainer
+    ])
+    private readonly overlayContainer = E("div", { class: "artwork-overlay" }, [
+        this.imageFilter,
+        this.contentWrapper
     ])
 
     // Remember overlay instance for each image
@@ -159,8 +164,9 @@ export default class ArtworkOverlay {
         ArtworkOverlay.showPostScores = enabled
     }
 
-    constructor(img: HTMLImageElement, url: string, details: ArtworkDetails) {
-        this.img = img
+    constructor(imgContainer: HTMLElement, url: string, details: ArtworkDetails) {
+        this.imgContainer = imgContainer
+        this.imgElements = [...imgContainer.querySelectorAll("img")]
         this.url = url
         this.details = details
 
@@ -169,7 +175,6 @@ export default class ArtworkOverlay {
         this.overlayContainer.style.opacity = "0"
 
         // Add overlay to image container
-        const imgContainer = this.img.parentElement!
         imgContainer.style.position = "relative"
         imgContainer.appendChild(this.overlayContainer)
         ArtworkOverlay.imageContainerToOverlay.set(imgContainer, this)
@@ -230,12 +235,12 @@ export default class ArtworkOverlay {
         }
         // Fade out image and fade in overlay
         this.overlayContainer.style.display = "flex";
-        anime({ targets: this.img, opacity: 0.4, duration: 200, easing: "linear" })
+        anime({ targets: this.imgElements, opacity: 0.4, duration: 200, easing: "linear" })
         return anime({ targets: this.overlayContainer, opacity: 1, duration: 200, easing: "linear" }).finished
     }
 
     hide() {
-        anime({ targets: this.img, opacity: 1, duration: 180, easing: "linear" })
+        anime({ targets: this.imgElements, opacity: 1, duration: 180, easing: "linear" })
         return anime({ targets: this.overlayContainer, opacity: 0.0, duration: 180, easing: "linear" })
             .finished.then(() => { this.overlayContainer.style.display = "none" })
     }
@@ -290,7 +295,12 @@ export default class ArtworkOverlay {
                 this.checkResults.set(host, this.conductCheck(dataUrl, host))
             }
         }
-        this.imageFilter.style.width = `${this.img.offsetWidth}px`
+        const imageWidth = this.imgElements[0].offsetWidth
+        const containerWidth = this.imgContainer.offsetWidth
+        const imageOffset = (containerWidth - imageWidth) / 2
+        
+        this.imageFilter.style.width = `${imageWidth}px`
+        this.imageFilter.style.left = `${imageOffset}px`
         const urlParts = this.url.split("/")
         const filename = urlParts[urlParts.length - 1]
         ArtworkOverlay.filenameToOverlay.set(filename, this)
@@ -306,7 +316,7 @@ export default class ArtworkOverlay {
         } else {
             const promises = this.hosts.map(host => this.showCheckStatus(host))
             Promise.all(promises).then(() => this.updateImageFilter())
-            this.multiStatusContainer.style.width = `${this.img.offsetWidth}px`
+            this.multiStatusContainer.style.width = `${imageWidth}px`
             this.multiStatusContainer.style.display = "block"
             anime({ targets: this.multiStatusContainer,
                 opacity: 1, duration: 240, easing: "linear" })
