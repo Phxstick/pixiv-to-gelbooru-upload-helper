@@ -1,5 +1,5 @@
 import browser from "webextension-polyfill";
-import { HostName, BooruPost } from "./types"
+import { PostHost, BooruPost, Message } from "./types"
 
 export function E(type: string, props?: any, children?: (HTMLElement | string)[] | string): HTMLElement {
     const element = document.createElement(type);
@@ -161,7 +161,7 @@ export function createInput(props: InputProps) {
 export function createPostLink(
     container: HTMLElement,
     postId: string,
-    host: HostName,
+    host: PostHost,
     text?: string,
     post?: BooruPost,
     showScore = false,
@@ -179,9 +179,9 @@ export function createPostLink(
         content.push(E("span", { class: "upvotes" }, textContent))
     }
     let href: string
-    if (host === HostName.Gelbooru) {
+    if (host === PostHost.Gelbooru) {
         href = "https://gelbooru.com/index.php?page=post&s=view&id=" + postId
-    } else if (host === HostName.Danbooru) {
+    } else if (host === PostHost.Danbooru) {
         href = "https://danbooru.donmai.us/posts/" + postId
     } else {
         throw new Error(`Unknown image host ${host}.`)
@@ -225,4 +225,64 @@ export function isEqual<T>(value1: T, value2: T): boolean {
     } else {
         return value1 === value2
     }
+}
+
+// Display an alert if an error occurs in the given function in development mode
+export function announceError(func: Function) {
+    try {
+        func()
+    } catch (e) {
+        if (PRODUCTION) return
+        const message = e instanceof Error ? ` (${e.message})` : ""
+        window.alert(`Error occurred!${message}`)
+        throw e
+    }
+}
+
+/**
+ * Convert content of given HTML element to a string formatted according to
+ * Danbooru's DText specification.
+ */
+export function parseDescription(element: ChildNode): string {
+    const descriptionParts = []
+    for (const childNode of element.childNodes) {
+        if (childNode.nodeName === "#text") {
+            descriptionParts.push(childNode.textContent)
+        } else if (childNode.nodeName === "BR") {
+            descriptionParts.push("\n")
+        } else if (childNode.nodeName === "A") {
+            const linkElement = childNode as HTMLAnchorElement
+            const linkText = linkElement.textContent
+            let linkUrl = linkElement.href
+            const pixivJumpPrefix = "https://www.pixiv.net/jump.php?"
+            if (linkUrl.startsWith(pixivJumpPrefix)) {
+                linkUrl = decodeURIComponent(linkUrl.slice(pixivJumpPrefix.length))
+            }
+            const nijieJumpPrefix = "/jump.php?url="
+            if (linkUrl.startsWith(nijieJumpPrefix)) {
+                linkUrl = linkText
+            }
+            descriptionParts.push(
+                linkText === linkUrl ? `<${linkUrl}>` : `[${linkText}](${linkUrl})`)
+        } else if (childNode.nodeName === "STRONG") {
+            descriptionParts.push("[b]" + parseDescription(childNode) + "[/b]")
+        } else if (childNode.nodeName === "SPAN") {
+            const color = (childNode as HTMLSpanElement).style.color
+            const text = childNode.textContent
+            descriptionParts.push(
+                color ? `<span style="color:${color};">${text}</span>` : text)
+        } else {
+            throw new Error("Unsupported element type in description: " + childNode.nodeName)
+        }
+    }
+    return descriptionParts.join("")
+}
+
+export function capitalize(str: string) {
+    return str[0].toUpperCase() + str.slice(1)
+}
+
+// TODO: add return type
+export async function sendInternalMessage(message: Message) {
+    return await browser.runtime.sendMessage(message)
 }

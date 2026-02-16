@@ -1,11 +1,11 @@
 import browser from "webextension-polyfill";
 import anime from "animejs"
-import { PixivTags, HostName, UploadStatus, BooruPost, PostsMap } from "./types"
+import { ArtworkTags, PostHost, UploadStatus, BooruPost, PostsMap } from "./types"
 import { createPostLink, E } from "./utility"
 import "./artwork-overlay.scss"
 
 interface ArtworkDetails {
-    tags: PixivTags
+    tags: ArtworkTags
     title?: string
     description?: string
 }
@@ -24,8 +24,8 @@ export default class ArtworkOverlay {
     private readonly details: ArtworkDetails
 
     // Settings
-    private hosts: HostName[] = []
-    private defaultHost: HostName | "all-hosts" = "all-hosts"
+    private hosts: PostHost[] = []
+    private defaultHost: PostHost | "all-hosts" = "all-hosts"
     private static showPostScores = false
 
     // State variables
@@ -33,7 +33,7 @@ export default class ArtworkOverlay {
     private showingProgressBar = false
     private showingDownloadStatus = false
     private downloadPromise: Promise<string> | undefined
-    private checkResults = new Map<HostName, Promise<CheckResult>>()
+    private checkResults = new Map<PostHost, Promise<CheckResult>>()
 
     // Overlay elements
     private readonly imageFilter = E("div", { class: "image-filter" })
@@ -97,7 +97,7 @@ export default class ArtworkOverlay {
         if (!overlay) return
         const updatePromises: Promise<boolean>[] = []
         for (const key in uploadStatus) {
-            const host = key as HostName
+            const host = key as PostHost
             const postIds = uploadStatus[host]!.map(id => parseInt(id))
             const posts = postsMap ? postsMap[host] : undefined
             const promise = overlay.checkResults.get(host)
@@ -141,20 +141,20 @@ export default class ArtworkOverlay {
                 overlay.showSingleCheckResult(overlay.hosts[0])
             } else {
                 for (const key in uploadStatus) {
-                    overlay.handleStatusUpdate(key as HostName)
+                    overlay.handleStatusUpdate(key as PostHost)
                 }
                 overlay.updateImageFilter()
             }
         })
     }
 
-    static updateHosts(hosts: HostName[]) {
+    static updateHosts(hosts: PostHost[]) {
         for (const overlayInstance of ArtworkOverlay.imageContainerToOverlay.values()) {
             overlayInstance.setHosts(hosts)
         }
     }
 
-    static updateDefaultHost(host: HostName | "all-hosts") {
+    static updateDefaultHost(host: PostHost | "all-hosts") {
         for (const overlayInstance of ArtworkOverlay.imageContainerToOverlay.values()) {
             overlayInstance.setDefaultHost(host)
         }
@@ -197,7 +197,7 @@ export default class ArtworkOverlay {
                 const url = (target as HTMLAnchorElement).href
                 window.open(url, "_blank")?.focus()
             } else if (target.classList.contains("host-button")) {
-                this.check(target.dataset.value as HostName | "all-hosts")
+                this.check(target.dataset.value as PostHost | "all-hosts")
             } else return
             event.stopImmediatePropagation()
             event.preventDefault()
@@ -249,7 +249,7 @@ export default class ArtworkOverlay {
         this.overlayContainer.remove()
     }
 
-    setHosts(hosts: HostName[]) {
+    setHosts(hosts: PostHost[]) {
         this.hosts = hosts
         this.hostButtonsContainer.innerHTML = ""
         for (const host of hosts) {
@@ -266,7 +266,7 @@ export default class ArtworkOverlay {
         this.hostButtonsContainer.appendChild(allHostsButton)
     }
 
-    setDefaultHost(host: HostName | "all-hosts") {
+    setDefaultHost(host: PostHost | "all-hosts") {
         this.defaultHost = host
     }
 
@@ -276,7 +276,7 @@ export default class ArtworkOverlay {
         this.selectHostWrapper.style.opacity = "1"
     }
 
-    async check(host?: HostName | "all-hosts") {
+    async check(host?: PostHost | "all-hosts") {
         if (!host) host = this.defaultHost
         this.statusMessage.textContent = ""
         anime({ targets: this.selectHostWrapper,
@@ -393,7 +393,7 @@ export default class ArtworkOverlay {
         })
     }
 
-    private async conductCheck(dataUrl: string, host: HostName): Promise<CheckResult> {
+    private async conductCheck(dataUrl: string, host: PostHost): Promise<CheckResult> {
         const { tags, title, description } = this.details
         try {
             return await browser.runtime.sendMessage({
@@ -401,8 +401,9 @@ export default class ArtworkOverlay {
                 data: {
                     host,
                     file: dataUrl,
-                    url: this.url,
-                    pixivTags: tags,
+                    fileUrl: this.url,
+                    pageUrl: location.href,
+                    sourceTags: tags,
                     title,
                     description
                 }
@@ -412,7 +413,7 @@ export default class ArtworkOverlay {
         }
     }
 
-    private initCheckStatus(host: HostName): HTMLElement {
+    private initCheckStatus(host: PostHost): HTMLElement {
         const checkButton = E("button", { class: "check-button"}, "Check status")
         const retryButton = E("button", { class: "retry-button"}, "Retry status check")
         const uploadButton = E("button", { class: "upload-page-button"}, "Go to upload page")
@@ -453,7 +454,7 @@ export default class ArtworkOverlay {
         return statusContainer
     }
 
-    private async showCheckStatus(host: HostName) {
+    private async showCheckStatus(host: PostHost) {
         let statusContainer = this.multiStatusContainer.querySelector(
             `[data-host='${host}']`)
         if (statusContainer === null) {
@@ -498,7 +499,7 @@ export default class ArtworkOverlay {
         this.handleStatusUpdate(host, checkResult)
     }
 
-    private async handleStatusUpdate(host: HostName, checkResult?: CheckResult) {
+    private async handleStatusUpdate(host: PostHost, checkResult?: CheckResult) {
         if (!checkResult) {
             const checkResultPromise = this.checkResults.get(host)
             if (!checkResultPromise) return
@@ -563,7 +564,7 @@ export default class ArtworkOverlay {
         }
     }
 
-    private async showSingleCheckResult(host: HostName, checkResult?: CheckResult) {
+    private async showSingleCheckResult(host: PostHost, checkResult?: CheckResult) {
         if (!checkResult) {
             const checkResultPromise = this.checkResults.get(host)
             if (!checkResultPromise) return

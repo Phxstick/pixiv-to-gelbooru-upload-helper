@@ -19,7 +19,8 @@ export default ((_, argv) => {
         entry: {
             background: "./src/js/pages/background.ts",
             settings: "./src/js/pages/settings.ts",
-            pixivScript: "./src/js/pixiv-script.ts"
+            pixivScript: "./src/js/pixiv-script.ts",
+            nijieScript: "./src/js/nijie-script.ts"
         },
         output: {
             publicPath: "",

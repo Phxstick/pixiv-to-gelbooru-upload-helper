@@ -3,8 +3,8 @@ import ThumbnailStatus from "./thumbnail-status";
 import ArtistCheck from "./artist-check";
 import ArtworkOverlay from "./artwork-overlay";
 import SettingsManager from "./settings-manager";
-import { PixivTags, Settings, HostName, ThumbnailSize } from "./types";
-import { isEqual } from "./utility"
+import { ArtworkTags, Settings, PostHost, ThumbnailSize, GetArtworkHandler, MessageType, SourceHost, Message } from "./types";
+import { announceError, isEqual, parseDescription } from "./utility"
 import "./pixiv-script.scss"
 
 enum Container {
@@ -13,12 +13,12 @@ enum Container {
     RelatedPics = "related-pics"
 }
 
-const thumbnailStatus = new ThumbnailStatus()
-const artistCheck =  new ArtistCheck()
+const thumbnailStatus = new ThumbnailStatus(SourceHost.Pixiv)
+const artistCheck =  new ArtistCheck(SourceHost.Pixiv)
 
 let currentSettings = SettingsManager.getDefaultValues();
 const settingsLoaded = browser.runtime.sendMessage({ type: "get-settings" }).then(updateSettings)
-thumbnailStatus.setHosts(currentSettings.enabledHosts as HostName[])
+thumbnailStatus.setHosts(currentSettings.enabledHosts as PostHost[])
 
 let stickyParent: HTMLElement
 const stickyParentObserver = new MutationObserver(() => {
@@ -27,18 +27,6 @@ const stickyParentObserver = new MutationObserver(() => {
         (stickyElement as HTMLElement).style.position = "static"
     }
 })
-
-// Display an alert if an error occurs in the given function in development mode
-function announceError(func: Function) {
-    try {
-        func()
-    } catch (e) {
-        if (PRODUCTION) return
-        const message = e instanceof Error ? ` (${e.message})` : ""
-        window.alert(`Error occurred!${message}`)
-        throw e
-    }
-}
 
 function applySettings(changedSettings?: Set<keyof Settings>) {
     const root = document.getElementById("__next") as HTMLElement
@@ -104,11 +92,11 @@ function applySettings(changedSettings?: Set<keyof Settings>) {
         ArtworkOverlay.togglePostScores(currentSettings.showPostScore)
     }
     if (hasChanged("enabledHosts")) {
-        thumbnailStatus.setHosts(currentSettings.enabledHosts as HostName[])
-        ArtworkOverlay.updateHosts(currentSettings.enabledHosts as HostName[])
+        thumbnailStatus.setHosts(currentSettings.enabledHosts as PostHost[])
+        ArtworkOverlay.updateHosts(currentSettings.enabledHosts as PostHost[])
     }
     if (hasChanged("defaultHost")) {
-        ArtworkOverlay.updateDefaultHost(currentSettings.defaultHost as HostName)
+        ArtworkOverlay.updateDefaultHost(currentSettings.defaultHost as PostHost)
     }
 }
 
@@ -124,36 +112,6 @@ async function updateSettings(settings: Settings): Promise<Set<keyof Settings>> 
         }
     }
     return changedSettings
-}
-
-/**
- * Convert content of given HTML element to a string formatted according to
- * Danbooru's DText specification.
- */
-function parseDescription(element: ChildNode): string {
-    const descriptionParts = []
-    for (const childNode of element.childNodes) {
-        if (childNode.nodeName === "#text") {
-            descriptionParts.push(childNode.textContent)
-        } else if (childNode.nodeName === "BR") {
-            descriptionParts.push("\n")
-        } else if (childNode.nodeName === "A") {
-            const linkElement = childNode as HTMLAnchorElement
-            const linkText = linkElement.textContent
-            let linkUrl = linkElement.href
-            const pixivJumpPrefix = "https://www.pixiv.net/jump.php?"
-            if (linkUrl.startsWith(pixivJumpPrefix)) {
-                linkUrl = decodeURIComponent(linkUrl.slice(pixivJumpPrefix.length))
-            }
-            descriptionParts.push(
-                linkText === linkUrl ? `<${linkUrl}>` : `[${linkText}](${linkUrl})`)
-        } else if (childNode.nodeName === "STRONG") {
-            descriptionParts.push("[b]" + parseDescription(childNode) + "[/b]")
-        } else {
-            throw new Error("Unsupported element type in description: " + childNode.nodeName)
-        }
-    }
-    return descriptionParts.join("")
 }
 
 function getTitleAndDescription(): { title?: string, description?: string } {
@@ -187,9 +145,9 @@ function getTitleAndDescription(): { title?: string, description?: string } {
     return data
 }
 
-function gatherPixivTags(): PixivTags {
+function gatherArtworkTags(): ArtworkTags {
     const tagWrappers = document.querySelectorAll("footer ul > li > span")
-    const pixivTags: PixivTags = {}
+    const pixivTags: ArtworkTags = {}
     for (const tagWrapper of tagWrappers) {
         let originalTag
         let translatedTag = ""
@@ -208,8 +166,7 @@ function gatherPixivTags(): PixivTags {
 
 function getPreviewImage(clickedImg: HTMLImageElement): HTMLImageElement | null {
     // Check if the clicked image is already a preview
-    if (!clickedImg.src.includes("img-original")
-            || clickedImg.parentElement!.tagName === "A")
+    if (!clickedImg.src.includes("img-original") || clickedImg.closest("a") !== null)
         return clickedImg
 
     // Find a preview if the given image is an original version
@@ -230,63 +187,74 @@ function getPreviewImage(clickedImg: HTMLImageElement): HTMLImageElement | null 
     return document.querySelector(`img[src*='${imageIdentifier}']`) as HTMLImageElement | null
 }
 
-// Ctrl + click an image to add the original version of it to an upload tab 
-async function artworkCheckListener(event: MouseEvent) {
-    if (!event.ctrlKey && !event.metaKey) return
-    const target = event.target as HTMLElement
-    if (target.tagName !== "IMG") return
-    const clickedImg = target as HTMLImageElement
-
+const getArtwork: GetArtworkHandler = (clickedImg) => {
     // Don't trigger on thumbnails
-    if (clickedImg.src.includes("custom-thumb")) return
-    if (clickedImg.src.includes("square")) return
+    if (clickedImg.src.includes("custom-thumb")) return null
+    if (clickedImg.src.includes("square")) return null
 
     // Get preview image
     const previewImage = getPreviewImage(clickedImg)
-    if (!previewImage) return
-    event.stopPropagation()
-    event.preventDefault()
+    if (!previewImage) return null
 
     // Get URL of original image and container of preview image
-    const url = previewImage.parentElement!.getAttribute("href")
-    if (url === null || !url.includes("img-original")) return
-    const imgContainer = previewImage.closest(".gtm-medium-work-expanded-view") as HTMLElement | null
-                         || previewImage.parentElement!.parentElement!
-    if (!imgContainer) return
+    const url = previewImage.closest("a")!.getAttribute("href")
+    if (url === null || !url.includes("img-original")) return null
+    const container = previewImage.closest(".gtm-medium-work-expanded-view") as HTMLElement | null
+                      || previewImage.parentElement!.parentElement!
+    if (!container) return null
 
-    // If this image was already handled before, display existing overlay
-    const existingOverlay = ArtworkOverlay.getOverlay(imgContainer)
-    if (existingOverlay !== undefined) {
-        existingOverlay.show()
-        if (event.shiftKey) existingOverlay.selectHost()
-        return
-    }
+    return { url, container }
+}
 
-    // Extract artwork title, description and tags from the page
-    const tags = gatherPixivTags()
-    let title: string | undefined
-    let description: string | undefined
-    try {
-        ({ title, description } = getTitleAndDescription());
-    } catch (error) {
-        const message = error instanceof Error ? error.message : "<no message>"
-        if (!PRODUCTION) {
-            window.alert("Error parsing title or description: " + message)
+// Ctrl + click an image to add the original version of it to an upload tab 
+function getArtworkCheckListener(getArtwork: GetArtworkHandler) {
+    return async (event: MouseEvent) => {
+        if (!event.ctrlKey && !event.metaKey) return
+        const target = event.target as HTMLElement
+        if (target.tagName !== "IMG") return
+        const clickedImg = target as HTMLImageElement
+
+        // Get URL of original image and container of preview image
+        const result = getArtwork(clickedImg)
+        if (result === null) return
+        const { url, container: imgContainer } = result
+        event.stopPropagation()
+        event.preventDefault()
+
+        // If this image was already handled before, display existing overlay
+        const existingOverlay = ArtworkOverlay.getOverlay(imgContainer)
+        if (existingOverlay !== undefined) {
+            existingOverlay.show()
+            if (event.shiftKey) existingOverlay.selectHost()
+            return
+        }
+
+        // Extract artwork title, description and tags from the page
+        const tags = gatherArtworkTags()
+        let title: string | undefined
+        let description: string | undefined
+        try {
+            ({ title, description } = getTitleAndDescription());
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "<no message>"
+            if (!PRODUCTION) {
+                window.alert("Error parsing title or description: " + message)
+            }
+        }
+
+        // Create new overlay, download and check image
+        const artworkOverlay = new ArtworkOverlay(imgContainer, url, { tags, title, description })
+        artworkOverlay.setHosts(currentSettings.enabledHosts as PostHost[])
+        artworkOverlay.show()
+        if (event.shiftKey) {
+            artworkOverlay.selectHost()
+        } else {
+            artworkOverlay.check(event.altKey ?
+                "all-hosts" : currentSettings.defaultHost as PostHost)
         }
     }
-
-    // Create new overlay, download and check image
-    const artworkOverlay = new ArtworkOverlay(imgContainer, url, { tags, title, description })
-    artworkOverlay.setHosts(currentSettings.enabledHosts as HostName[])
-    artworkOverlay.show()
-    if (event.shiftKey) {
-        artworkOverlay.selectHost()
-    } else {
-        artworkOverlay.check(event.altKey ?
-            "all-hosts" : currentSettings.defaultHost as HostName)
-    }
 }
-const artworkCheckListenerArgs = ["click", artworkCheckListener, { capture: true }] as const
+const artworkCheckListenerArgs = ["click", getArtworkCheckListener(getArtwork), { capture: true }] as const
 
 // When a pixiv post from a different artist is clicked, the container with pictures
 // from the current artist will be replaced, observe an ancestor to handle this case
@@ -300,25 +268,6 @@ const picsByArtistWrapperObserver = new MutationObserver(mutationList => {
                     thumbnailStatus.clear()
                     announceError(() => handleArtworkPage(navElements))
                 }
-            }
-        }
-    }
-})
-
-const knownListings = new WeakSet<HTMLElement>()
-
-// Also handle switching between listing
-const listingWrapperObserver = new MutationObserver(mutationList => {
-    for (const mutation of mutationList) {
-        if (mutation.addedNodes.length) {
-            for (const node of mutation.addedNodes) {
-                const element = node as HTMLElement
-                const listing = element.querySelector("ul")
-                if (listing === null) continue
-                if (knownListings.has(listing)) continue
-                knownListings.add(listing)
-                thumbnailStatus.clear()
-                thumbnailStatus.manage([{ container: listing, size: "large" }])
             }
         }
     }
@@ -377,17 +326,8 @@ function handleArtworkPage(navElements: HTMLElement[]) {
     artistCheck.handleContainers(artistContainers)
 }
 
-function handleListingPage(listing: HTMLElement) {
-    const listingWrapper = listing.parentElement!.parentElement!.parentElement!.parentElement!
-    listingWrapperObserver.disconnect()
-    // Wrapper can be different on some pages, observe all possible candidates
-    listingWrapperObserver.observe(listingWrapper, { childList: true })
-    listingWrapperObserver.observe(listingWrapper.parentElement!, { childList: true })
-
-    settingsLoaded.then(() => {
-        applySettings()
-        thumbnailStatus.manage([{ container: listing, size: "large" }])
-    })
+function handleListingPage() {
+    settingsLoaded.then(() => applySettings())
 
     // Click artist name or profile picture to check artist posts
     const artistNameDiv = document.querySelector("h1")!
@@ -414,24 +354,40 @@ const postPageObserver = new MutationObserver((mutationList) => {
     announceError(() => handleArtworkPage(navElements))
 })
 
+
+function searchForListings(element: HTMLElement): HTMLElement[] {
+    if (element.tagName === "IMG" || element.tagName === "IFRAME") {
+        return []
+    } else if (element.tagName === "UL") {
+        return [element]
+    } else if (element.tagName === "LI") {
+        // if (!element.hasAttribute("size")) continue
+        const listElement = element.closest("ul") as HTMLElement | null
+        if (listElement === null) return []
+        return [listElement]
+    } else {
+        if (!element.querySelectorAll) return []
+        return [...element.querySelectorAll("ul")].filter(
+            listElement => listElement.querySelector("ul") === null)
+    }
+}
+
+const knownListings = new WeakSet<HTMLElement>()
+
 const listingPageObserver = new MutationObserver(mutationList => {
     for (const mutation of mutationList) {
         if (mutation.addedNodes.length) {
             for (const node of mutation.addedNodes) {
-                const element = node as HTMLElement
-                let listing
-                if (element.tagName === "UL") {
-                    listing = element
-                } else if (element.tagName === "LI") {
-                    // if (!element.hasAttribute("size")) continue
-                    listing = element.closest("ul") as HTMLElement | null
-                    if (listing === null) continue
-                } else {
-                    continue
+                const listings = searchForListings(node as HTMLElement)
+                for (const listing of listings) {
+                    if (knownListings.has(listing)) continue
+                    knownListings.add(listing)
+                    announceError(() => {
+                        settingsLoaded.then(() => {
+                            thumbnailStatus.manage([{ container: listing, size: "large" }])
+                        })
+                    })
                 }
-                if (knownListings.has(listing)) continue
-                knownListings.add(listing)
-                announceError(() => handleListingPage(listing))
             }
         }
     }
@@ -464,6 +420,7 @@ function main() {
     if (pageType === "post") {
         postPageObserver.observe(root, { childList: true, subtree: true })
     } else if (pageType === "listing" || pageType === "tag") {
+        handleListingPage()
         listingPageObserver.observe(root, { childList: true, subtree: true })
     }
 }
@@ -471,16 +428,18 @@ function main() {
 browser.runtime.onMessage.addListener((message, sender) => {
     if (sender.id !== browser.runtime.id) return
     if (!message || !message.type) return
+    const { type, args } = message as Message
 
     // Extension will send notification if an upload status changes
-    if (message.type === "pixiv-status-update") {
-        if (!message.args) return
-        const { pixivIdToPostIds, filenameToPostIds, posts } = message.args
-        thumbnailStatus.update(pixivIdToPostIds)
-        if (filenameToPostIds) {
-            for (const filename in filenameToPostIds) {
-                const statusUpdate = filenameToPostIds[filename]
-                ArtworkOverlay.update(filename, statusUpdate, posts)
+    if (type === MessageType.StatusUpdate) {
+        const { sourceHost, sourceIdToPostIds, filenameToPostIds, posts } = args
+        if (sourceHost === SourceHost.Pixiv) {
+            thumbnailStatus.update(sourceIdToPostIds)
+            if (filenameToPostIds) {
+                for (const filename in filenameToPostIds) {
+                    const statusUpdate = filenameToPostIds[filename]
+                    ArtworkOverlay.update(filename, statusUpdate, posts)
+                }
             }
         }
     }
@@ -488,13 +447,12 @@ browser.runtime.onMessage.addListener((message, sender) => {
     // When clicking on a Pixiv link, it doesn't load an entirely new page,
     // so the content script is not executed again. Therefore, the background
     // page tells the content script when the URL in its page has changed
-    else if (message.type === "url-changed") {
+    else if (type === MessageType.UrlChanged) {
         main()
     }
 
-    else if (message.type === "settings-changed") {
-        if (!message.args) return
-        updateSettings(message.args.settings).then(changedSettings => {
+    else if (type === MessageType.SettingsChanged) {
+        updateSettings(args.settings).then(changedSettings => {
             if (changedSettings.size) applySettings(changedSettings)
         })
     }

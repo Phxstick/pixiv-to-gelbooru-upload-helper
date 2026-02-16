@@ -1,8 +1,9 @@
 import SettingsManager from "js/settings-manager";
 import browser from "webextension-polyfill";
-import { HostName, StatusMap, PixivId, PostsMap, UploadExtensionCommunicationError } from "js/types";
+import { PostHost, StatusMap, SourceId, UploadExtensionCommunicationError, StatusUpdate, MessageType, Message, SourceHost, PostId } from "js/types";
+import { capitalize } from "js/utility";
 
-type PixivIdToPostIds = { [key in string]: string[] }
+type SourceIdToPostIds = { [key in SourceId]: PostId[] }
 
 interface Post {
     id: string | number
@@ -18,40 +19,44 @@ const UPLOAD_EXTENSION_STORE_ID = "ilemnfmnoanhiapnbdjolbojmpkbhbnp"
 const UPLOAD_EXTENSION = PRODUCTION ? UPLOAD_EXTENSION_STORE_ID :
     (UPLOAD_EXTENSION_ID || UPLOAD_EXTENSION_STORE_ID)
 
-const PIXIV_TABS_KEY = "pixivTabs"
-const StatusMapKeys: { [key in HostName]: string } = {
-    [HostName.Gelbooru]: "pixivIdToGelbooruIds",
-    [HostName.Danbooru]: "pixivIdToDanbooruIds"
+const sourceTabsKeys: Record<SourceHost, string> = {} as any // TODO: remove workaround
+const statusMapKeys: Record<SourceHost, Record<PostHost, string>> = {} as any  // TODO: remove workaround
+for (const sourceHost of Object.values(SourceHost)) {
+    sourceTabsKeys[sourceHost] = `${sourceHost}Tabs`
+    statusMapKeys[sourceHost] = {} as any  // TODO: remove workaround
+    for (const destinationHost of Object.values(PostHost)) {
+        statusMapKeys[sourceHost][destinationHost] =
+            `${sourceHost}IdTo${capitalize(destinationHost)}Ids`
+    }
 }
-const allHosts = Object.values(HostName) as HostName[]
 
-async function getPostsForPixivIds(pixivIds: string[], hosts?: HostName[]): Promise<StatusMap> {
-    if (!hosts) hosts = allHosts
-    const storageKeys = hosts.map(host => StatusMapKeys[host])
+const sourceHostnames: Record<string, SourceHost> = {
+    "www.pixiv.net": SourceHost.Pixiv,
+    "nijie.info": SourceHost.Nijie
+}
+
+const allSourceHosts = Object.values(SourceHost) as SourceHost[]
+const allPostHosts = Object.values(PostHost) as PostHost[]
+
+async function getPostsForSourceIds(sourceHost: SourceHost, sourceIds: string[], postHosts?: PostHost[]): Promise<StatusMap> {
+    if (!postHosts) postHosts = allPostHosts
+    const storageKeys = postHosts.map(host => statusMapKeys[sourceHost][host])
     const localData = await browser.storage.local.get(storageKeys)
     const statusMap: StatusMap = {}
-    for (const pixivId of pixivIds) {
-        statusMap[pixivId] = {}
-        for (let i = 0; i < hosts.length; ++i) {
+    for (const sourceId of sourceIds) {
+        statusMap[sourceId] = {}
+        for (let i = 0; i < postHosts.length; ++i) {
             if (!localData[storageKeys[i]]) continue
-            const pixivIdToPostIds = localData[storageKeys[i]] as PixivIdToPostIds
-            if (pixivId in pixivIdToPostIds) {
-                statusMap[pixivId][hosts[i]] = pixivIdToPostIds[pixivId]
+            const sourceIdToPostIds = localData[storageKeys[i]] as SourceIdToPostIds
+            if (sourceId in sourceIdToPostIds) {
+                statusMap[sourceId][postHosts[i]] = sourceIdToPostIds[sourceId]
             }
         }
     }
     return statusMap
 }
 
-function getPixivIdFromUrl(urlString: string): string {
-    if (!urlString) return ""
-    let url
-    try {
-        url = new URL(urlString)
-    } catch (error) {
-        return ""
-    }
-    if (!url) return ""
+function getPixivIdFromUrl(url: URL): string {
     if (url.host === "www.pixiv.net") {
         if (url.searchParams.has("illust_id")) {
             return url.searchParams.get("illust_id")!
@@ -67,7 +72,31 @@ function getPixivIdFromUrl(urlString: string): string {
     return ""
 }
 
-async function getPostsForArtistTag(artistTag: string, host: HostName): Promise<PixivIdToPostIds> {
+function getNijieIdFromUrl(url: URL): string {
+    if (url.host === "nijie.info") {
+        if (url.pathname === "/view.php" || url.pathname === "/view_popup.php") {
+            return url.searchParams.get("id") || ""
+        }
+    }
+    return ""
+}
+
+function getSourceIdFromUrl(sourceHost: SourceHost, urlString: string): string {
+    if (!urlString) return ""
+    let url
+    try {
+        url = new URL(urlString)
+    } catch (error) {
+        return ""
+    }
+    switch (sourceHost) {
+        case SourceHost.Pixiv: return getPixivIdFromUrl(url)
+        case SourceHost.Nijie: return getNijieIdFromUrl(url)
+        default: throw new Error()
+    }
+}
+
+async function getPostsForArtistTag(sourceHost: SourceHost, artistTag: string, host: PostHost): Promise<SourceIdToPostIds> {
     let response: { error?: string, posts: Post[] }
     try {
         response = await browser.runtime.sendMessage(UPLOAD_EXTENSION, {
@@ -78,18 +107,18 @@ async function getPostsForArtistTag(artistTag: string, host: HostName): Promise<
         throw new UploadExtensionCommunicationError()
     }
     if (response.error) throw new Error(response.error)
-    const pixivIdToPostIds: PixivIdToPostIds = {}
+    const sourceIdToPostIds: SourceIdToPostIds = {}
     for (const post of response.posts) {
-        const pixivId = getPixivIdFromUrl(post.source)
-        if (!pixivId) continue
+        const sourceId = getSourceIdFromUrl(sourceHost, post.source)
+        if (!sourceId) continue
         const postId = post.id.toString()
-        if (pixivId in pixivIdToPostIds) {
-            pixivIdToPostIds[pixivId].push(postId)
+        if (sourceId in sourceIdToPostIds) {
+            sourceIdToPostIds[sourceId].push(postId)
         } else {
-            pixivIdToPostIds[pixivId] = [postId]
+            sourceIdToPostIds[sourceId] = [postId]
         }
     }
-    return pixivIdToPostIds
+    return sourceIdToPostIds
 }
 
 async function searchForArtists(url: string): Promise<ArtistInfo[]> {
@@ -106,31 +135,31 @@ async function searchForArtists(url: string): Promise<ArtistInfo[]> {
     return response.artists
 }
 
-async function handleArtistStatusCheck(url: string, hosts: HostName[]) {
+async function handleArtistStatusCheck(sourceHost: SourceHost, url: string, hosts: PostHost[]) {
     const artistInfos = await searchForArtists(url)
     if (artistInfos.length === 0) {
-        return { pixivIds: [], numPosts: {} }
+        return { sourceIds: [], numPosts: {} }
     }
-    const pixivIdSet = new Set<PixivId>()
-    const numPosts: { [key in HostName]?: number } = {}
+    const sourceIdSet = new Set<SourceId>()
+    const numPosts: { [key in PostHost]?: number } = {}
     const statusMap: StatusMap = {}
     for (const { name, isBanned } of artistInfos) {
         for (const host of hosts) {
             numPosts[host] = 0
-            const artistStatusMap = await getPostsForArtistTag(name, host)
-            for (const pixivId in artistStatusMap) {
-                const postIds = artistStatusMap[pixivId]
-                if (!(pixivId in statusMap)) {
-                    statusMap[pixivId] = { [host]: postIds }
-                    pixivIdSet.add(pixivId)
+            const artistStatusMap = await getPostsForArtistTag(sourceHost, name, host)
+            for (const sourceId in artistStatusMap) {
+                const postIds = artistStatusMap[sourceId]
+                if (!(sourceId in statusMap)) {
+                    statusMap[sourceId] = { [host]: postIds }
+                    sourceIdSet.add(sourceId)
                     numPosts[host]! += postIds.length
                 } else {
-                    if (!(host in statusMap[pixivId])) {
-                        statusMap[pixivId][host] = []
+                    if (!(host in statusMap[sourceId])) {
+                        statusMap[sourceId][host] = []
                     }
                     for (const postId of postIds) {
-                        if (!statusMap[pixivId][host]!.includes(postId)) {
-                            statusMap[pixivId][host]!.push(postId)
+                        if (!statusMap[sourceId][host]!.includes(postId)) {
+                            statusMap[sourceId][host]!.push(postId)
                             numPosts[host]! += 1
                         }
                     }
@@ -138,66 +167,62 @@ async function handleArtistStatusCheck(url: string, hosts: HostName[]) {
             }
         }
     }
-    handleUploadStatusUpdate({ pixivIdToPostIds: statusMap })
-    return { pixivIds: [...pixivIdSet], numPosts }
-}
-
-interface StatusUpdate {
-    pixivIdToPostIds: StatusMap
-    filenameToPostIds?: StatusMap
-    posts?: PostsMap
+    handleUploadStatusUpdate({ sourceHost, sourceIdToPostIds: statusMap })
+    return { sourceIds: [...sourceIdSet], numPosts }
 }
 
 async function handleUploadStatusUpdate(statusUpdate: StatusUpdate) {
-    // Notify all opened Pixiv tabs of this status update
-    const sessionData = await browser.storage.session.get({ [PIXIV_TABS_KEY]: [] })
-    const pixivTabs = sessionData[PIXIV_TABS_KEY] as number[]
+    const { sourceHost, sourceIdToPostIds } = statusUpdate
+    const sourceTabsKey = sourceTabsKeys[sourceHost]
+
+    // Notify all opened source tabs of this status update
+    const sessionData = await browser.storage.session.get({ [sourceTabsKey]: [] })
+    const sourceTabs = sessionData[sourceTabsKey] as number[]
     const tabUpdatePromises = []
     const invalidTabs = new Set()
-    for (const tabId of pixivTabs) {
+    for (const tabId of sourceTabs) {
         tabUpdatePromises.push(browser.tabs.sendMessage(tabId, {
-            type: "pixiv-status-update",
+            type: MessageType.StatusUpdate,
             args: statusUpdate
         }).catch(() => {
-            // Remove tabs that cannot be reached (Pixiv is no longer opened)
+            // Remove tabs that cannot be reached (if source site is no longer open)
             invalidTabs.add(tabId)
         }))
     }
     Promise.allSettled(tabUpdatePromises).then(() => {
-        const filteredTabs = pixivTabs.filter(tabId => !invalidTabs.has(tabId))
-        if (pixivTabs.length !== filteredTabs.length) {
-            browser.storage.session.set({ [PIXIV_TABS_KEY]: filteredTabs })
+        const filteredTabs = sourceTabs.filter(tabId => !invalidTabs.has(tabId))
+        if (sourceTabs.length !== filteredTabs.length) {
+            browser.storage.session.set({ [sourceTabsKey]: filteredTabs })
         }
     })
 
     // Add new data to mapping in local storage
-    const storedMaps: { [key in HostName]?: PixivIdToPostIds } = {}
-    const { pixivIdToPostIds } = statusUpdate
-    for (const pixivId in pixivIdToPostIds) {
-        for (const key in pixivIdToPostIds[pixivId]) {
-            const host = key as HostName
-            const postIds = pixivIdToPostIds[pixivId][host]!
-            if (!storedMaps[host]) {
-                const key = StatusMapKeys[host]
-                const localData = await browser.storage.local.get({ [key]: {} })
-                storedMaps[host] = localData[key] as PixivIdToPostIds
+    const storedMaps: { [key in PostHost]?: SourceIdToPostIds } = {}
+    for (const sourceId in sourceIdToPostIds) {
+        for (const key in sourceIdToPostIds[sourceId]) {
+            const postHost = key as PostHost
+            const postIds = sourceIdToPostIds[sourceId][postHost]!
+            if (!storedMaps[postHost]) {
+                const statusMapKey = statusMapKeys[sourceHost][postHost]
+                const localData = await browser.storage.local.get({ [statusMapKey]: {} })
+                storedMaps[postHost] = localData[statusMapKey] as SourceIdToPostIds
             }
-            const storedMap = storedMaps[host]!
-            if (pixivId in storedMap) {
+            const storedMap = storedMaps[postHost]!
+            if (sourceId in storedMap) {
                 for (const postId of postIds) {
-                    if (!storedMap[pixivId].includes(postId)) {
-                        storedMap[pixivId].push(postId)
+                    if (!storedMap[sourceId].includes(postId)) {
+                        storedMap[sourceId].push(postId)
                     }
                 }
             } else {
-                storedMap[pixivId] = [...postIds]
+                storedMap[sourceId] = [...postIds]
             }
         }
     }
     const storageUpdate: any = {}
     for (const key in storedMaps) {
-        const host = key as HostName
-        storageUpdate[StatusMapKeys[host]] = storedMaps[host]!
+        const postHost = key as PostHost
+        storageUpdate[statusMapKeys[sourceHost][postHost]] = storedMaps[postHost]!
     }
     await browser.storage.local.set(storageUpdate)
 }
@@ -231,7 +256,7 @@ async function handleImageDownload(url: string, port: browser.Runtime.Port) {
     port.postMessage({ type: "finished", data: { dataUrl }})
 }
 
-async function downloadPixivImage(url: string): Promise<string | null> {
+async function downloadImage(url: string): Promise<string | null> {
     try {
         const response = await fetch(url)
         const blob = await response.blob()
@@ -258,23 +283,26 @@ browser.runtime.onMessage.addListener(async (request, sender) => {
     if (request.type === "prepare-upload" || request.type === "focus-tab") {
         // Just forward messages with these types to the upload extension
         return browser.runtime.sendMessage(UPLOAD_EXTENSION, request)
-    } else if (request.type === "find-posts-by-artist") {
-        return handleArtistStatusCheck(args.url, args.hosts)
-    } else if (request.type === "pixiv-status-update") {
+    } else if (request.type === MessageType.FindPostsByArtist) {
+        return handleArtistStatusCheck(args.sourceHost, args.url, args.hosts)
+    } else if (request.type === MessageType.StatusUpdate) {
         handleUploadStatusUpdate(args as StatusUpdate)
-    } else if (request.type === "get-host-status") {
-        return getPostsForPixivIds(args.pixivIds, args.hosts)
+    } else if (request.type === MessageType.GetPostStatus) {
+        return getPostsForSourceIds(args.sourceHost, args.sourceIds, args.postHosts)
     } else if (request.type === "get-settings") {
         return SettingsManager.getAll()
-    } else if (request.type === "settings-changed") {
-        const sessionData = await browser.storage.session.get({ [PIXIV_TABS_KEY]: [] })
-        const pixivTabs = sessionData[PIXIV_TABS_KEY] as number[]
-        const settings = await SettingsManager.getAll()
-        for (const tabId of pixivTabs) {
-            browser.tabs.sendMessage(tabId, {
-                type: "settings-changed",
-                args: { settings }
-            }).catch(() => {})
+    } else if (request.type === MessageType.SettingsChanged) {
+        for (const sourceHost of allSourceHosts) {
+            const sourceTabKey = sourceTabsKeys[sourceHost]
+            const sessionData = await browser.storage.session.get({ [sourceTabKey]: [] })
+            const sourceTabs = sessionData[sourceTabKey] as number[]
+            const settings = await SettingsManager.getAll()
+            for (const tabId of sourceTabs) {
+                browser.tabs.sendMessage(tabId, {
+                    type: MessageType.SettingsChanged,
+                    args: { settings }
+                }).catch(() => {})
+            }
         }
     }
 })
@@ -307,35 +335,42 @@ browser.runtime.onInstalled.addListener(async () => {
 browser.runtime.onMessageExternal.addListener((request, sender) => {
     if (!sender.id || sender.id !== UPLOAD_EXTENSION) return
     if (!request && !request.type) return
-    const args = request.args || {}
-    if (request.type === "pixiv-status-update") {
-        handleUploadStatusUpdate(args as StatusUpdate)
-    } else if (request.type === "download-pixiv-image") {
-        return downloadPixivImage(args.url).then(dataUrl => ({ dataUrl }))
+    const { type, args } = request as Message
+    if (type === MessageType.StatusUpdate) {
+        handleUploadStatusUpdate(args)
+    } else if (type === MessageType.DownloadImage) {
+        return downloadImage(args.url).then(dataUrl => ({ dataUrl }))
     }
 })
 
-// Update mapping from tab IDs to pixiv IDs when a tab is closed or its URL changes
-// (NOTE: tabs where URL changes from Pixiv to a different page are not detected here,
+// Update mapping from tab IDs to source IDs when a tab is closed or its URL changes
+// (NOTE: tabs where URL changes from a source to a different page are not detected here,
 // those tabs get deleted when a status update takes place, see further above)
 browser.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
     if (changeInfo.url === undefined) return
     const url = new URL(changeInfo.url)
-    if (url.hostname !== "www.pixiv.net") return
-    const sessionData = await browser.storage.session.get({ [PIXIV_TABS_KEY]: [] })
-    const pixivTabs = sessionData[PIXIV_TABS_KEY] as number[]
-    if (pixivTabs.includes(tabId)) {
-        browser.tabs.sendMessage(tabId, { type: "url-changed" })
+    const sourceHost = sourceHostnames[url.hostname]
+    if (!sourceHost) return
+    // TODO: handle case where URL changes from one source to a different source
+    const sourceTabsKey = sourceTabsKeys[sourceHost]
+    const sessionData = await browser.storage.session.get({ [sourceTabsKey]: [] })
+    const sourceTabs = sessionData[sourceTabsKey] as number[]
+    if (sourceTabs.includes(tabId)) {
+        browser.tabs.sendMessage(tabId, { type: MessageType.UrlChanged })
     } else {
-        pixivTabs.push(tabId)
-        await browser.storage.session.set({ [PIXIV_TABS_KEY]: pixivTabs })
+        sourceTabs.push(tabId)
+        await browser.storage.session.set({ [sourceTabsKey]: sourceTabs })
     }
 })
 browser.tabs.onRemoved.addListener(async (tabId) => {
-    const sessionData = await browser.storage.session.get({ [PIXIV_TABS_KEY]: [] })
-    const pixivTabs = sessionData[PIXIV_TABS_KEY] as number[]
-    const tabIndex = pixivTabs.indexOf(tabId)
-    if (tabIndex < 0) return
-    pixivTabs.splice(tabIndex, 1)
-    await browser.storage.session.set({ [PIXIV_TABS_KEY]: pixivTabs })
+    // TODO: merge storage access for all sources to reduce overhead
+    for (const sourceHost of allSourceHosts) {
+        const sourceTabsKey = sourceTabsKeys[sourceHost]
+        const sessionData = await browser.storage.session.get({ [sourceTabsKey]: [] })
+        const sourceTabs = sessionData[sourceTabsKey] as number[]
+        const tabIndex = sourceTabs.indexOf(tabId)
+        if (tabIndex < 0) continue
+        sourceTabs.splice(tabIndex, 1)
+        await browser.storage.session.set({ [sourceTabsKey]: sourceTabs })
+    }
 })

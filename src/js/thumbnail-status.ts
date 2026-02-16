@@ -1,12 +1,13 @@
-import browser from "webextension-polyfill";
-import { ThumbnailSize, HostName, UploadStatus, StatusMap, HostMaps } from "./types";
+import { ThumbnailSize, PostHost, UploadStatus, StatusMap, HostMaps, MessageType, Message, SourceHost } from "./types";
 import ThumbnailPanel from "./thumbnail-panel";
 import "./thumbnail-status.scss"
+import { sendInternalMessage } from "./utility";
 
 export default class ThumbnailStatus {
-    private readonly pixivIdToElements = new Map<string, HTMLElement[]>()
+    private readonly sourceIdToElements = new Map<string, HTMLElement[]>()
     private readonly hostMaps: HostMaps = {}
-    private hosts: HostName[] = []
+    private sourceHost: SourceHost
+    private postHosts: PostHost[] = []
     private showMarkers = true
     private observedContainers = new Set<HTMLElement>()
 
@@ -14,21 +15,21 @@ export default class ThumbnailStatus {
     // dynamically. Updates those links and requests upload status if necessary.
     private readonly linkContainerObserver = new MutationObserver((mutationList) => {
         for (const mutation of mutationList) {
-            this.handlePixivLinks(mutation.addedNodes)
+            this.handleSourceLinks(mutation.addedNodes)
             // Nodes removed during scrolling will not be reused again
             // so remove them from the mapping to prevent a memory leak
             for (const node of mutation.removedNodes) {
-                Promise.resolve(this.extractPixivId(node as HTMLElement))
+                Promise.resolve(this.extractSourceId(node as HTMLElement))
                 .then((pixivId) => {
-                    const elements = this.pixivIdToElements.get(pixivId)
+                    const elements = this.sourceIdToElements.get(pixivId)
                     if (elements === undefined) {
                         return  // Shouldn't happen actually
                     }
                     const newElements = elements.filter(el => el !== node)
                     if (newElements.length > 0) {
-                        this.pixivIdToElements.set(pixivId, newElements)
+                        this.sourceIdToElements.set(pixivId, newElements)
                     } else {
-                        this.pixivIdToElements.delete(pixivId)
+                        this.sourceIdToElements.delete(pixivId)
                     }
                 })
             }
@@ -45,13 +46,17 @@ export default class ThumbnailStatus {
                     const linkElement = mutation.target as HTMLElement
                     if (!linkElement.classList.contains("handled")) {
                         linkElement.classList.add("handled")
-                        const pixivId = this.extractPixivId(mutation.target as HTMLElement)
+                        const pixivId = this.extractSourceId(mutation.target as HTMLElement)
                         Promise.resolve(pixivId).then((id) => this.updateLinkElements(id))
                     }
                 }
             }
         }
     })
+
+    constructor(sourceHost: SourceHost) {
+        this.sourceHost = sourceHost
+    }
 
     manage(containers: { container: HTMLElement, size: ThumbnailSize }[]) {
         if (containers.length === 0) return 
@@ -62,6 +67,7 @@ export default class ThumbnailStatus {
             if (container.offsetParent === null) {
                 outdatedContainerExists = true
                 this.observedContainers.delete(container)
+                // TODO: also remove contained elements and outdated map entries
             }
         }
 
@@ -86,48 +92,52 @@ export default class ThumbnailStatus {
     }
 
     manageContainer(container: HTMLElement, size: ThumbnailSize) {
-        const panel = new ThumbnailPanel(this.hostMaps, size)
+        const panel = new ThumbnailPanel(this.sourceHost, this.hostMaps, size)
         panel.attachTo(container)
-        // Sometimes the container gets replaced with a new one,
-        // use a childList observer on the parent to catch those cases
-        const containerWrapperObserver = new MutationObserver((mutationList) => {
-            for (const mutation of mutationList) {
-                for (const node of mutation.addedNodes) {
-                    const element = node as HTMLElement
-                    if (element.tagName != "UL") continue
-                    this.linkContainerObserver.observe(element, { childList: true })
-                    panel.attachTo(element)
-                    this.handlePixivLinks(element.children)
+
+        if (this.sourceHost === SourceHost.Pixiv) {
+            // Sometimes the container gets replaced with a new one,
+            // use a childList observer on the parent to catch those cases
+            const containerWrapperObserver = new MutationObserver((mutationList) => {
+                for (const mutation of mutationList) {
+                    for (const node of mutation.addedNodes) {
+                        const element = node as HTMLElement
+                        if (element.tagName != "UL") continue
+                        this.linkContainerObserver.observe(element, { childList: true })
+                        panel.attachTo(element)
+                        this.handleSourceLinks(element.children)
+                    }
                 }
-            }
-        })
-        containerWrapperObserver.observe(container.parentElement!, { childList: true })
-        this.handlePixivLinks(container.children)
+            })
+            containerWrapperObserver.observe(container.parentElement!, { childList: true })
+        }
+
+        this.handleSourceLinks(container.children)
     }
 
     update(statusMap: StatusMap) {
-        for (const pixivId in statusMap) {
-            if (!this.pixivIdToElements.has(pixivId)) continue
-            this.updateArtworkStatus(pixivId, statusMap[pixivId])
+        for (const sourceId in statusMap) {
+            if (!this.sourceIdToElements.has(sourceId)) continue
+            this.updateArtworkStatus(sourceId, statusMap[sourceId])
         }
     }
 
     clear() {
         for (const key in this.hostMaps) {
-            const host = key as HostName
+            const host = key as PostHost
             this.hostMaps[host]!.clear()
         }
         this.linkContainerObserver.disconnect()
-        this.pixivIdToElements.clear()
+        this.sourceIdToElements.clear()
         this.observedContainers.clear()
     }
 
     // Toggle markers on/off 
     toggle(enabled: boolean) {
         this.showMarkers = enabled
-        for (const [pixivId, linkElements] of this.pixivIdToElements.entries()) {
+        for (const [sourceId, linkElements] of this.sourceIdToElements.entries()) {
             if (enabled) {
-                this.updateLinkElements(pixivId)
+                this.updateLinkElements(sourceId)
             } else {
                 for (const linkElement of linkElements) {
                     linkElement.classList.remove(
@@ -137,105 +147,116 @@ export default class ThumbnailStatus {
         }
     }
 
-    setHosts(hosts: HostName[]) {
-        this.hosts = hosts
+    setHosts(hosts: PostHost[]) {
+        this.postHosts = hosts
         if (this.showMarkers) {
-            this.requestUploadStatus([...this.pixivIdToElements.keys()])
+            this.requestUploadStatus([...this.sourceIdToElements.keys()])
         }
     }
 
     // Fully handle a list of link elements, i.e. register them, request status
     // from background page if needed, and perform modifications in the DOM
-    private handlePixivLinks(linkElements: Iterable<Node | Element>) {
-        const isCheckedPixivId = (pixivId: string) => {
-            for (const host of this.hosts) {
-                const pixivIdToPostIds = this.hostMaps[host]
-                if (!pixivIdToPostIds) return false
-                if (!pixivIdToPostIds.has(pixivId)) return false
+    private handleSourceLinks(linkElements: Iterable<Node | Element>) {
+        const isCheckedSourceId = (sourceId: string) => {
+            for (const host of this.postHosts) {
+                const sourceIdToPostIds = this.hostMaps[host]
+                if (!sourceIdToPostIds) return false
+                if (!sourceIdToPostIds.has(sourceId)) return false
             }
             return true
         }
-        const newPixivIds: string[] = []
+        const newSourceIds: string[] = []
         for (const element of linkElements) {
             const htmlElement = element as HTMLElement
             const aElement = htmlElement.querySelector("a")
             if (!aElement) continue
+            if (!aElement.dataset.gtmValue) continue
             if (aElement.href.includes("booth") || aElement.href.includes("sketch"))
                 continue
-            const pixivId = this.registerPixivLink(htmlElement)
-            if (typeof pixivId === "string") {
-                if (isCheckedPixivId(pixivId)) {
-                    this.updateLinkElements(pixivId)
+            const sourceId = this.registerSourceLink(htmlElement)
+            if (typeof sourceId === "string") {
+                if (isCheckedSourceId(sourceId)) {
+                    this.updateLinkElements(sourceId)
                 } else {
-                    newPixivIds.push(pixivId)
+                    newSourceIds.push(sourceId)
                 }
             } else {
-                pixivId.then(pixivId => {
-                    if (isCheckedPixivId(pixivId)) {
-                        this.updateLinkElements(pixivId)
+                sourceId.then(sourceId => {
+                    if (isCheckedSourceId(sourceId)) {
+                        this.updateLinkElements(sourceId)
                     } else {
-                        this.requestUploadStatus([pixivId])
+                        this.requestUploadStatus([sourceId])
                     }
                 })
             }
         }
-        if (newPixivIds.length > 0) {
-            this.requestUploadStatus(newPixivIds)
+        if (newSourceIds.length > 0) {
+            this.requestUploadStatus(newSourceIds)
         }
     }
 
     // Request upload status from background page and update mapping
-    private async requestUploadStatus(pixivIds: string[]) {
-        if (pixivIds.length === 0) return
-        const statusMap: StatusMap = await browser.runtime.sendMessage({
-            type: "get-host-status",
-            args: { pixivIds, hosts: this.hosts }
+    private async requestUploadStatus(sourceIds: string[]) {
+        if (sourceIds.length === 0) return
+        const statusMap: StatusMap = await sendInternalMessage({
+            type: MessageType.GetPostStatus,
+            args: {
+                sourceHost: this.sourceHost,
+                sourceIds,
+                postHosts: this.postHosts }
         })
-        for (const pixivId in statusMap) {
-            this.updateArtworkStatus(pixivId, statusMap[pixivId])
+        for (const sourceId in statusMap) {
+            this.updateArtworkStatus(sourceId, statusMap[sourceId])
         }
     }
 
-    // Update mapping from Pixiv ID to list of post IDs
-    private updateArtworkStatus(pixivId: string, uploadStatus: UploadStatus) {
+    // Update mapping from source ID to list of post IDs
+    private updateArtworkStatus(sourceId: string, uploadStatus: UploadStatus) {
         for (const key in uploadStatus) {
-            const host = key as HostName
+            const host = key as PostHost
             const postIds = uploadStatus[host]!
-            let pixivIdToPostIds = this.hostMaps[host]
-            if (!pixivIdToPostIds) {
-                pixivIdToPostIds = new Map()
-                this.hostMaps[host] = pixivIdToPostIds
+            let sourceIdToPostIds = this.hostMaps[host]
+            if (!sourceIdToPostIds) {
+                sourceIdToPostIds = new Map()
+                this.hostMaps[host] = sourceIdToPostIds
             }
-            if (!pixivIdToPostIds.has(pixivId)) {
-                pixivIdToPostIds.set(pixivId, postIds)
+            if (!sourceIdToPostIds.has(sourceId)) {
+                sourceIdToPostIds.set(sourceId, postIds)
             } else {
-                const knownPostIds = pixivIdToPostIds.get(pixivId)!
+                const knownPostIds = sourceIdToPostIds.get(sourceId)!
                 for (const postId of postIds) {
                     if (!knownPostIds.includes(postId))
                         knownPostIds.push(postId)
                 }
             }
         }
-        this.updateLinkElements(pixivId)
+        this.updateLinkElements(sourceId)
     }
 
-    // Visually update link elements pointing to artwork with given pixiv ID
+    // Visually update link elements pointing to artwork with given source ID
     // according to its upload status
-    private updateLinkElements(pixivId: string) {
+    private updateLinkElements(sourceId: string) {
         if (!this.showMarkers) return
-        const linkElements = this.pixivIdToElements.get(pixivId)
+        let linkElements = this.sourceIdToElements.get(sourceId)
         if (linkElements === undefined) return
+        // Remove outdated elements that are no longer on the page
+        const filteredElements = linkElements.filter(el => el.offsetParent !== null)
+        if (filteredElements.length !== linkElements.length) {
+            this.sourceIdToElements.set(sourceId, filteredElements)
+            if (filteredElements.length === 0) return
+            linkElements = filteredElements
+        }
         let numPosts = 0
         let isChecked = false
         let isSomeHostMissing = false
         let isPartiallyChecked = false
-        for (const host of this.hosts) {
-            const pixivIdToPostIds = this.hostMaps[host]
-            if (!pixivIdToPostIds) {
+        for (const host of this.postHosts) {
+            const sourceIdToPostIds = this.hostMaps[host]
+            if (!sourceIdToPostIds) {
                 isPartiallyChecked = true
                 continue
             }
-            const postIds = pixivIdToPostIds.get(pixivId)
+            const postIds = sourceIdToPostIds.get(sourceId)
             if (!postIds) {
                 isPartiallyChecked = true
                 continue
@@ -247,8 +268,11 @@ export default class ThumbnailStatus {
         }
         if (!isChecked) return
         for (const linkElement of linkElements) {
-            // Large tiles have "size" attribute, highlight them more
-            if (linkElement.hasAttribute("size")) linkElement.classList.add("large")
+            // Adjust size of highlighting based on the thumbnail size
+            const sizeElement = linkElement.querySelector("div[height]")
+            const height = sizeElement && sizeElement.getAttribute("height")
+            if (height && parseInt(height) > 160) linkElement.classList.add("large")
+
             linkElement.classList.toggle("partially-checked", isPartiallyChecked)
             linkElement.classList.toggle("checked-uploaded", numPosts > 0 && !isSomeHostMissing)
             linkElement.classList.toggle("checked-mixed", numPosts > 0 && isSomeHostMissing)
@@ -257,28 +281,39 @@ export default class ThumbnailStatus {
     }
 
     // Update mapping with given link element
-    private registerPixivLink(linkElement: HTMLElement): string | Promise<string> {
-        const handler = (pixivId: string) => {
-            if (!this.pixivIdToElements.has(pixivId)) {
-                this.pixivIdToElements.set(pixivId, [])
+    private registerSourceLink(linkElement: HTMLElement): string | Promise<string> {
+        const handler = (sourceId: string) => {
+            if (!this.sourceIdToElements.has(sourceId)) {
+                this.sourceIdToElements.set(sourceId, [])
             }
-            const elements = this.pixivIdToElements.get(pixivId)!
+            const elements = this.sourceIdToElements.get(sourceId)!
             if (!elements.includes(linkElement)) {
                 elements.push(linkElement)
                 linkElement.classList.add("handled")
                 this.linkObserver.observe(linkElement, { attributeFilter: ["class"] })
             }
-            return pixivId
+            return sourceId
         }
-        const pixivId = this.extractPixivId(linkElement)
-        if (typeof pixivId === "string") {
-            return handler(pixivId)
+        const sourceId = this.extractSourceId(linkElement)
+        if (typeof sourceId === "string") {
+            return handler(sourceId)
         } else {
-            return pixivId.then(handler)
+            return sourceId.then(handler)
         }
     }
 
-    // Extract pixiv ID from given link
+    private extractSourceId(linkElement: HTMLElement): string | Promise<string> {
+        switch (this.sourceHost) {
+            case SourceHost.Pixiv: return this.extractPixivId(linkElement)
+            case SourceHost.Nijie: return this.extractNijieId(linkElement)
+            default: throw new Error()
+        }
+    }
+
+    private extractNijieId(linkElement: HTMLElement): string {
+        return linkElement.querySelector("img")!.getAttribute("illust_id")!
+    }
+
     private extractPixivId(linkElement: HTMLElement): string | Promise<string> {
         let aElement = linkElement.querySelector("a")
         if (aElement !== null) {

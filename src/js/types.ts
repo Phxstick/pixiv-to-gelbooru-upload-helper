@@ -38,26 +38,32 @@ export type SettingsDefinition = {
     [key in keyof Settings]: SettingDetails
 }
 
-export type PixivId = string
+export type SourceId = string
+export type PostId = string
 
-export type PixivIdToPostIds = Map<PixivId, string[]>
-export type HostMaps = { [key in HostName]?: PixivIdToPostIds } 
+export type SourceIdToPostIds = Map<SourceId, PostId[]>
+export type HostMaps = { [key in PostHost]?: SourceIdToPostIds } 
 
-export type PixivTags = { [key in PixivId]: string }
+export type ArtworkTags = { [key in SourceId]: string }
 
 export type ThumbnailSize = "small" | "medium" | "large"
 
-export enum HostName {
+export enum PostHost {
     Gelbooru = "gelbooru",
     Danbooru = "danbooru"
 }
 
+export enum SourceHost {
+    Pixiv = "pixiv",
+    Nijie = "nijie"
+}
+
 export type UploadStatus = {
-    [key in HostName]?: string[]
+    [key in PostHost]?: string[]
 }
 
 export type StatusMap = {
-    // Key can be Pixiv ID or filename
+    // Key can be source ID or filename
     [key in string]: UploadStatus
 }
 
@@ -72,7 +78,7 @@ export interface BooruPost {
 }
 
 export type PostsMap = {
-    [key in HostName]?: { [key in number]: BooruPost }
+    [key in PostHost]?: { [key in number]: BooruPost }
 }
 
 export class UploadExtensionCommunicationError extends Error {
@@ -81,3 +87,43 @@ export class UploadExtensionCommunicationError extends Error {
         this.name = "UploadExtensionCommunicationError"
     }
 }
+
+export interface StatusUpdate {
+    sourceHost: SourceHost
+    sourceIdToPostIds: StatusMap
+    filenameToPostIds?: StatusMap
+    posts?: PostsMap
+}
+
+export enum MessageType {
+    StatusUpdate = "status-update",
+    SettingsChanged = "settings-changed",
+    DownloadImage = "download-image",
+    FindPostsByArtist = "find-posts-by-artist",
+    GetPostStatus = "get-post-status",
+    UrlChanged = "url-changed"
+}
+
+export type Message = {
+    type: MessageType.StatusUpdate,
+    args: StatusUpdate
+} | {
+    type: MessageType.SettingsChanged,
+    args: { settings: Settings }
+} | {
+    type: MessageType.DownloadImage,
+    args: { url: string }
+} | {
+    type: MessageType.GetPostStatus,
+    args: {
+        sourceHost: SourceHost,
+        sourceIds: SourceId[],
+        postHosts: PostHost[]
+    }
+} | {
+    type: MessageType.UrlChanged,
+    args: undefined
+}
+
+export type GetArtworkHandler =
+    (clickedImg: HTMLImageElement) => { container: HTMLElement, url: string } | null

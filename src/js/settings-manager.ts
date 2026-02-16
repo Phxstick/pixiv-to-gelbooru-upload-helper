@@ -1,5 +1,5 @@
 import browser from "webextension-polyfill"
-import { Settings, SettingsDefinition, HostName } from "js/types";
+import { Settings, SettingsDefinition, PostHost } from "js/types";
 import SelectWidget from "js/generic/select-widget";
 
 type SettingKey = keyof Settings
@@ -12,8 +12,8 @@ class SettingsManager {
         hideRelatedPixivPics: false,
         hideOtherPicsByArtist: false,
         hidePixivHeader: false,
-        enabledHosts: [HostName.Gelbooru],
-        defaultHost: HostName.Gelbooru
+        enabledHosts: [PostHost.Gelbooru],
+        defaultHost: PostHost.Gelbooru
     }
 
     public static getDefaultValues(): Settings {
@@ -46,8 +46,8 @@ class SettingsManager {
             enabledHosts: {
                 type: "multi-select",
                 text: "Enabled image boards:",
-                labels: Object.keys(HostName),
-                values: Object.values(HostName),
+                labels: Object.keys(PostHost),
+                values: Object.values(PostHost),
                 atLeastOne: true
             },
             defaultHost: {

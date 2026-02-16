@@ -1,5 +1,5 @@
 import browser from "webextension-polyfill";
-import { ThumbnailSize, HostName, HostMaps } from "./types";
+import { ThumbnailSize, PostHost, HostMaps, StatusUpdate, MessageType, SourceHost } from "./types";
 import { createPostLink, E } from "./utility"
 import "./thumbnail-panel.scss"
 
@@ -22,7 +22,7 @@ export default class ThumbnailPanel {
         this.input
     ])
 
-    constructor(hostMaps: HostMaps, size: ThumbnailSize) {
+    constructor(sourceHost: SourceHost, hostMaps: HostMaps, size: ThumbnailSize) {
         this.hostMaps = hostMaps
 
         this.input.addEventListener("keypress", (event) => {
@@ -37,15 +37,18 @@ export default class ThumbnailPanel {
             }
             const { postId, host } = result
             createPostLink(this.linkContainer, postId, host)
-            browser.runtime.sendMessage({
-                type: "pixiv-status-update",
-                args: {
-                    pixivIdToPostIds: {
-                        [this.currentPixivId]: {
-                            [host]: [postId]
-                        }
+            const statusUpdate: StatusUpdate = {
+                // TODO: adjust based on host
+                sourceHost,
+                sourceIdToPostIds: {
+                    [this.currentPixivId]: {
+                        [host]: [postId]
                     }
                 }
+            }
+            browser.runtime.sendMessage({
+                type: MessageType.StatusUpdate,
+                args: statusUpdate
             })
         })
         this.wrapper.classList.add(size)
@@ -78,7 +81,7 @@ export default class ThumbnailPanel {
         })
     }
 
-    private parsePostUrl(value: string): { postId: string, host: HostName } | undefined {
+    private parsePostUrl(value: string): { postId: string, host: PostHost } | undefined {
         let url
         try {
              url = new URL(value)
@@ -89,7 +92,7 @@ export default class ThumbnailPanel {
             if (!url.searchParams.has("id")) return
             return {
                 postId: url.searchParams.get("id")!,
-                host: HostName.Gelbooru
+                host: PostHost.Gelbooru
             }
         } else if (url.host === "danbooru.donmai.us") {
             const parts = url.pathname.slice(1).split("/")
@@ -98,7 +101,7 @@ export default class ThumbnailPanel {
             if (isNaN(parts[1] as any)) return
             return {
                 postId: parts[1],
-                host: HostName.Danbooru
+                host: PostHost.Danbooru
             }
         }
     }
@@ -110,7 +113,7 @@ export default class ThumbnailPanel {
         this.input.value = ""
         this.linkContainer.innerHTML = ""
         for (const key in this.hostMaps) {
-            const host = key as HostName
+            const host = key as PostHost
             const pixivIdToPostIds = this.hostMaps[host]!
             const postIds = pixivIdToPostIds.get(this.currentPixivId) || []
             postIds.forEach(id => createPostLink(this.linkContainer, id, host))

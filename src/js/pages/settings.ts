@@ -1,5 +1,5 @@
 import SettingsManager from "js/settings-manager";
-import { Settings } from "js/types";
+import { MessageType, Settings } from "js/types";
 import SelectWidget from "js/generic/select-widget";
 import { createInput, createToggle, createToggleGroup, E } from "js/utility";
 import browser from "webextension-polyfill";
@@ -33,7 +33,7 @@ window.onload = async () => {
     const settingsChangedListeners: ((settings: Settings) => void)[] = []
     const currentValues = await SettingsManager.getAll()
     const onSettingsChanged = async (key: keyof Settings) => {
-        browser.runtime.sendMessage({ type: "settings-changed" })
+        browser.runtime.sendMessage({ type: MessageType.SettingsChanged })
         const currentSettings = await SettingsManager.getAll()
         settingsChangedListeners.forEach(listener => listener(currentSettings))
     }

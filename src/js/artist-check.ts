@@ -2,7 +2,7 @@ import browser from "webextension-polyfill";
 import SettingsManager from "js/settings-manager";
 import { E, catchError } from "./utility";
 import anime from "animejs";
-import { HostName } from "./types";
+import { PostHost, MessageType, SourceHost } from "./types";
 import "./artist-check.scss";
 
 interface ArtistContainer {
@@ -11,11 +11,13 @@ interface ArtistContainer {
 }
 
 export default class ArtistCheck {
+    private sourceHost: SourceHost
     private readonly overlay = E("div", { class: "artist-check-overlay hidden" })
     private readonly globalKeydownListeners: any[] = []
     private readonly globalKeyupListeners: any[] = []
 
-    constructor() {
+    constructor(sourceHost: SourceHost) {
+        this.sourceHost = sourceHost
         document.body.appendChild(this.overlay)
         this.overlay.addEventListener("click", async () => {
             await anime({ targets: this.overlay, opacity: 0, duration: 140, easing: "linear" }).finished
@@ -81,7 +83,7 @@ export default class ArtistCheck {
 
     private async handleSearch(event: MouseEvent, artistUrl: string) {
         const settings = await SettingsManager.get(["enabledHosts"])
-        const enabledHosts = settings.enabledHosts as HostName[]
+        const enabledHosts = settings.enabledHosts as PostHost[]
 
         if (enabledHosts.length === 1) {
             this.findPosts(artistUrl, enabledHosts)
@@ -93,7 +95,7 @@ export default class ArtistCheck {
             const hostName = host[0].toUpperCase() + host.slice(1)
             const item = E("div", { class: "item" }, hostName)
             item.addEventListener("click", () => {
-                this.findPosts(artistUrl, [host] as HostName[])
+                this.findPosts(artistUrl, [host] as PostHost[])
             })
             popupItems.push(item)
         }
@@ -129,7 +131,7 @@ export default class ArtistCheck {
         document.body.appendChild(hostSelectionPopup)
     }
 
-    private async findPosts(artistUrl: string, hosts: HostName[]) {
+    private async findPosts(artistUrl: string, hosts: PostHost[]) {
         this.overlay.style.opacity = "0"
         this.overlay.innerHTML = "Searching for posts...";
         this.overlay.classList.remove("hidden")
@@ -137,8 +139,8 @@ export default class ArtistCheck {
 
         const [result, error] = await catchError(() =>
             browser.runtime.sendMessage({
-                type: "find-posts-by-artist",
-                args: { url: artistUrl, hosts }
+                type: MessageType.FindPostsByArtist,
+                args: { sourceHost: this.sourceHost, url: artistUrl, hosts }
             })
         )
         if (error) {
@@ -152,7 +154,7 @@ export default class ArtistCheck {
             }
             return
         }
-        const { pixivIds, numPosts } = result
+        const { sourceIds, numPosts } = result
 
         let numPostsTotal = 0
         for (const host in numPosts) numPostsTotal += numPosts[host]
@@ -167,12 +169,12 @@ export default class ArtistCheck {
             const hostString = host[0].toUpperCase() + host.slice(1)
             this.overlay.innerHTML =
                 `Found ${numPosts[host]} ${hostString} posts<br>` +
-                `for ${pixivIds.length} Pixiv artworks!`
+                `for ${sourceIds.length} Pixiv artworks!`
             return
         }
 
         this.overlay.innerHTML =
-            `Found matching posts for ${pixivIds.length} Pixiv artworks:`
+            `Found matching posts for ${sourceIds.length} Pixiv artworks:`
         for (const host in numPosts) {
             const hostString = host[0].toUpperCase() + host.slice(1)
             this.overlay.innerHTML +=
