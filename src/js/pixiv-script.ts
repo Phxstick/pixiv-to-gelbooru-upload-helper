@@ -273,14 +273,6 @@ const picsByArtistWrapperObserver = new MutationObserver(mutationList => {
     }
 })
 
-// function getListing(section: HTMLElement) {
-//     if (section.firstChild === null) return null
-//     const sectionHeader = section.firstChild.textContent!
-//     if (!sectionHeader.startsWith("Illustrations")
-//             && !sectionHeader.startsWith("Works")) return null
-//     return section.querySelector("ul")
-// }
-
 function handleArtworkPage(navElements: HTMLElement[]) {
     document.removeEventListener(...artworkCheckListenerArgs)
     document.addEventListener(...artworkCheckListenerArgs)
@@ -326,31 +318,15 @@ function handleArtworkPage(navElements: HTMLElement[]) {
     artistCheck.handleContainers(artistContainers)
 }
 
-function handleListingPage() {
-    settingsLoaded.then(() => applySettings())
-
-    // Click artist name or profile picture to check artist posts
-    const artistNameDiv = document.querySelector("h1")!
-    if (artistNameDiv !== null) {
-        artistNameDiv.dataset.gtmValue = ""
-        const artistImage = document.querySelectorAll("[role='img']")[1].parentElement as HTMLElement
-        const artistUrl = window.location.href
-        artistCheck.handleContainers([
-            { element: artistNameDiv.parentElement!, artistUrl },
-            { element: artistImage, artistUrl }
-        ])
-    }
-}
-
 // Pixiv content is loaded dynamically by scripts, so use observers
 // to wait for the required elements to appear before running other code
-const postPageObserver = new MutationObserver((mutationList) => {
+const artworkPageObserver = new MutationObserver((mutationList) => {
     // Some pages contain an additional hidden nav element, ignore that one
     // by filtering out elements with less than two classes
     const navElements = [...document.querySelectorAll("nav")!]
         .filter(el => el.classList.length >= 2)
     if (navElements.length < 2) return
-    postPageObserver.disconnect()
+    artworkPageObserver.disconnect()
     announceError(() => handleArtworkPage(navElements))
 })
 
@@ -372,9 +348,26 @@ function searchForListings(element: HTMLElement): HTMLElement[] {
     }
 }
 
+let foundHeader = false
+
+function handleListingArtistCheck() {
+    if (foundHeader) return
+    const artistNameElement = document.querySelector("h1")!
+    if (artistNameElement === null) return
+    foundHeader = true
+    artistNameElement.dataset.gtmValue = ""
+    const artistImage = document.querySelectorAll("[role='img']")[1].parentElement as HTMLElement
+    const artistUrl = window.location.href
+    artistCheck.handleContainers([
+        { element: artistNameElement.parentElement!, artistUrl },
+        { element: artistImage, artistUrl }
+    ])
+}
+
 const knownListings = new WeakSet<HTMLElement>()
 
 const listingPageObserver = new MutationObserver(mutationList => {
+    handleListingArtistCheck()
     for (const mutation of mutationList) {
         if (mutation.addedNodes.length) {
             for (const node of mutation.addedNodes) {
@@ -396,7 +389,7 @@ const listingPageObserver = new MutationObserver(mutationList => {
 let pageType: string | undefined
 
 function main() {
-    // Check if the type of page has changed (otherwise do nothing)
+    // Check if the type of page has changed
     let newPageType: string | undefined
     if (location.href.includes("/artworks/")) {
         newPageType = "post"
@@ -405,12 +398,22 @@ function main() {
     } else if (location.href.includes("/tags/")) {
         newPageType = "tag"
     }
+
+    // Clear some things even when switching between the same page type
+    if (pageType === "post") {
+        ArtworkOverlay.clear()
+    }
+    if (pageType === "listing") {
+        foundHeader = false
+    }
+
+    // Most things stay in place if the page type doesn't change
     if (pageType === newPageType) return
     pageType = newPageType;
 
     // Reset data structures and connect observers in order to find link containers
     listingPageObserver.disconnect()
-    postPageObserver.disconnect()
+    artworkPageObserver.disconnect()
     thumbnailStatus.clear()
     artistCheck.clear()
     document.removeEventListener(...artworkCheckListenerArgs)
@@ -418,9 +421,9 @@ function main() {
     // Root doesn't exist on 404 pages
     if (!root) return
     if (pageType === "post") {
-        postPageObserver.observe(root, { childList: true, subtree: true })
+        artworkPageObserver.observe(root, { childList: true, subtree: true })
     } else if (pageType === "listing" || pageType === "tag") {
-        handleListingPage()
+        settingsLoaded.then(() => applySettings())
         listingPageObserver.observe(root, { childList: true, subtree: true })
     }
 }
