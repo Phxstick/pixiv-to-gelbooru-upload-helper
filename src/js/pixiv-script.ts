@@ -341,6 +341,9 @@ function searchForListings(element: HTMLElement): HTMLElement[] {
         const listElement = element.closest("ul") as HTMLElement | null
         if (listElement === null) return []
         return [listElement]
+    // Tag listings now use regular divs instead of <ul> and <li> elements
+    } else if (element.tagName === "DIV" && element.dataset.ga4Label === "thumbnail") {
+        return element.parentElement ? [element.parentElement] : []
     } else {
         if (!element.querySelectorAll) return []
         return [...element.querySelectorAll("ul")].filter(
