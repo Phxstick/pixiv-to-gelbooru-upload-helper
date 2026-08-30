@@ -5,7 +5,9 @@ import ArtworkOverlay from "./artwork-overlay";
 import SettingsManager from "./settings-manager";
 import { ArtworkTags, Settings, PostHost, ThumbnailSize, GetArtworkHandler, MessageType, SourceHost, Message } from "./types";
 import { announceError, isEqual, parseDescription } from "./utility"
-import "./pixiv-script.scss"
+import "./base.scss"
+import "./pixiv.scss"
+import { Pixiv } from "./pixiv";
 
 enum Container {
     AdjacentPics = "adjacent-pics",
@@ -13,7 +15,8 @@ enum Container {
     RelatedPics = "related-pics"
 }
 
-const thumbnailStatus = new ThumbnailStatus(SourceHost.Pixiv)
+const pixivInterface = new Pixiv()
+const thumbnailStatus = new ThumbnailStatus(pixivInterface)
 const artistCheck =  new ArtistCheck(SourceHost.Pixiv)
 
 let currentSettings = SettingsManager.getDefaultValues();
@@ -337,7 +340,6 @@ function searchForListings(element: HTMLElement): HTMLElement[] {
     } else if (element.tagName === "UL") {
         return [element]
     } else if (element.tagName === "LI") {
-        // if (!element.hasAttribute("size")) continue
         const listElement = element.closest("ul") as HTMLElement | null
         if (listElement === null) return []
         return [listElement]
@@ -347,7 +349,8 @@ function searchForListings(element: HTMLElement): HTMLElement[] {
     } else {
         if (!element.querySelectorAll) return []
         return [...element.querySelectorAll("ul")].filter(
-            listElement => listElement.querySelector("ul") === null)
+            listElement => listElement.querySelector("ul") === null &&
+                           listElement.querySelector("img") !== null)
     }
 }
 
@@ -377,6 +380,7 @@ const listingPageObserver = new MutationObserver(mutationList => {
                 const listings = searchForListings(node as HTMLElement)
                 for (const listing of listings) {
                     if (knownListings.has(listing)) continue
+                    console.log("Found listing!")
                     knownListings.add(listing)
                     announceError(() => {
                         settingsLoaded.then(() => {

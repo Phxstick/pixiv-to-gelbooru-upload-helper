@@ -1,12 +1,13 @@
 import { ThumbnailSize, PostHost, UploadStatus, StatusMap, HostMaps, MessageType, Message, SourceHost } from "./types";
 import ThumbnailPanel from "./thumbnail-panel";
-import "./thumbnail-status.scss"
 import { sendInternalMessage } from "./utility";
+import { SourceHostInterface } from "./source-host";
+import "./thumbnail-status.scss"
 
 export default class ThumbnailStatus {
     private readonly sourceIdToElements = new Map<string, HTMLElement[]>()
     private readonly hostMaps: HostMaps = {}
-    private sourceHost: SourceHost
+    private sourceHost: SourceHostInterface
     private postHosts: PostHost[] = []
     private showMarkers = true
     private observedContainers = new Set<HTMLElement>()
@@ -19,17 +20,18 @@ export default class ThumbnailStatus {
             // Nodes removed during scrolling will not be reused again
             // so remove them from the mapping to prevent a memory leak
             for (const node of mutation.removedNodes) {
-                Promise.resolve(this.extractSourceId(node as HTMLElement))
-                .then((pixivId) => {
-                    const elements = this.sourceIdToElements.get(pixivId)
+                Promise.resolve(this.sourceHost.extractSourceId(node as HTMLElement))
+                .then((sourceId) => {
+                    if (!sourceId) return
+                    const elements = this.sourceIdToElements.get(sourceId)
                     if (elements === undefined) {
                         return  // Shouldn't happen actually
                     }
                     const newElements = elements.filter(el => el !== node)
                     if (newElements.length > 0) {
-                        this.sourceIdToElements.set(pixivId, newElements)
+                        this.sourceIdToElements.set(sourceId, newElements)
                     } else {
-                        this.sourceIdToElements.delete(pixivId)
+                        this.sourceIdToElements.delete(sourceId)
                     }
                 })
             }
@@ -45,16 +47,15 @@ export default class ThumbnailStatus {
                 if (mutation.attributeName === "class") {
                     const linkElement = mutation.target as HTMLElement
                     if (!linkElement.classList.contains("handled")) {
-                        linkElement.classList.add("handled")
-                        const pixivId = this.extractSourceId(mutation.target as HTMLElement)
-                        Promise.resolve(pixivId).then((id) => this.updateLinkElements(id))
+                        Promise.resolve(this.registerSourceLink(linkElement))
+                               .then((id) => id && this.updateLinkElements(id))
                     }
                 }
             }
         }
     })
 
-    constructor(sourceHost: SourceHost) {
+    constructor(sourceHost: SourceHostInterface) {
         this.sourceHost = sourceHost
     }
 
@@ -92,10 +93,10 @@ export default class ThumbnailStatus {
     }
 
     manageContainer(container: HTMLElement, size: ThumbnailSize) {
-        const panel = new ThumbnailPanel(this.sourceHost, this.hostMaps, size)
+        const panel = new ThumbnailPanel(this.sourceHost.name, this.hostMaps, size)
         panel.attachTo(container)
 
-        if (this.sourceHost === SourceHost.Pixiv) {
+        if (this.sourceHost.name === SourceHost.Pixiv) {
             // Sometimes the container gets replaced with a new one,
             // use a childList observer on the parent to catch those cases
             const containerWrapperObserver = new MutationObserver((mutationList) => {
@@ -140,8 +141,7 @@ export default class ThumbnailStatus {
                 this.updateLinkElements(sourceId)
             } else {
                 for (const linkElement of linkElements) {
-                    linkElement.classList.remove(
-                        "checked-uploaded", "checked-mixed", "checked-not-uploaded")
+                    linkElement.classList.remove("checked")
                 }
             }
         }
@@ -168,12 +168,8 @@ export default class ThumbnailStatus {
         const newSourceIds: string[] = []
         for (const element of linkElements) {
             const htmlElement = element as HTMLElement
-            const aElement = htmlElement.querySelector("a")
-            if (!aElement) continue
-            if (!aElement.dataset.gtmValue) continue
-            if (aElement.href.includes("booth") || aElement.href.includes("sketch"))
-                continue
             const sourceId = this.registerSourceLink(htmlElement)
+            if (!sourceId) continue
             if (typeof sourceId === "string") {
                 if (isCheckedSourceId(sourceId)) {
                     this.updateLinkElements(sourceId)
@@ -182,6 +178,7 @@ export default class ThumbnailStatus {
                 }
             } else {
                 sourceId.then(sourceId => {
+                    if (!sourceId) return
                     if (isCheckedSourceId(sourceId)) {
                         this.updateLinkElements(sourceId)
                     } else {
@@ -201,7 +198,7 @@ export default class ThumbnailStatus {
         const statusMap: StatusMap = await sendInternalMessage({
             type: MessageType.GetPostStatus,
             args: {
-                sourceHost: this.sourceHost,
+                sourceHost: this.sourceHost.name,
                 sourceIds,
                 postHosts: this.postHosts }
         })
@@ -268,11 +265,7 @@ export default class ThumbnailStatus {
         }
         if (!isChecked) return
         for (const linkElement of linkElements) {
-            // Adjust size of highlighting based on the thumbnail size
-            const sizeElement = linkElement.querySelector("div[height]")
-            const height = sizeElement && sizeElement.getAttribute("height")
-            if (height && parseInt(height) > 160) linkElement.classList.add("large")
-
+            linkElement.classList.add("checked")
             linkElement.classList.toggle("partially-checked", isPartiallyChecked)
             linkElement.classList.toggle("checked-uploaded", numPosts > 0 && !isSomeHostMissing)
             linkElement.classList.toggle("checked-mixed", numPosts > 0 && isSomeHostMissing)
@@ -281,67 +274,26 @@ export default class ThumbnailStatus {
     }
 
     // Update mapping with given link element
-    private registerSourceLink(linkElement: HTMLElement): string | Promise<string> {
-        const handler = (sourceId: string) => {
+    private registerSourceLink(linkElement: HTMLElement) {
+        const handler = (sourceId: string | null) => {
+            if (!sourceId) return null
             if (!this.sourceIdToElements.has(sourceId)) {
                 this.sourceIdToElements.set(sourceId, [])
             }
             const elements = this.sourceIdToElements.get(sourceId)!
             if (!elements.includes(linkElement)) {
                 elements.push(linkElement)
-                linkElement.classList.add("handled")
                 this.linkObserver.observe(linkElement, { attributeFilter: ["class"] })
             }
+            this.sourceHost.setThumbnailClasses(linkElement)
+            linkElement.classList.add("handled")
             return sourceId
         }
-        const sourceId = this.extractSourceId(linkElement)
-        if (typeof sourceId === "string") {
+        const sourceId = this.sourceHost.extractSourceId(linkElement)
+        if (typeof sourceId === "string" || sourceId === null) {
             return handler(sourceId)
         } else {
             return sourceId.then(handler)
         }
-    }
-
-    private extractSourceId(linkElement: HTMLElement): string | Promise<string> {
-        switch (this.sourceHost) {
-            case SourceHost.Pixiv: return this.extractPixivId(linkElement)
-            case SourceHost.Nijie: return this.extractNijieId(linkElement)
-            default: throw new Error()
-        }
-    }
-
-    private extractNijieId(linkElement: HTMLElement): string {
-        return linkElement.querySelector("img")!.getAttribute("illust_id")!
-    }
-
-    private extractPixivId(linkElement: HTMLElement): string | Promise<string> {
-        let aElement = linkElement.querySelector("a")
-        if (aElement !== null) {
-            const pixivId = aElement.dataset.gtmValue
-            if (!pixivId) {
-                if (!PRODUCTION) {
-                    console.log("Missing pixiv ID:", linkElement)
-                    alert("Pixiv ID extraction error.")
-                }
-                throw new Error("Couldn't find Pixiv ID for link element")
-            }
-            return pixivId
-        }
-        // <a> element in subtree of a link might not be present immediately,
-        // in that case use an childList observer to determine when it appears
-        // (NOTE: in some cases, it never appears, write code accordingly)
-        return new Promise<string>((resolve, reject) => {
-            const linkLoadObserver = new MutationObserver(() => {
-                const aElement = linkElement.querySelector("a")
-                if (aElement !== null) {
-                    const pixivId = aElement.dataset.gtmValue
-                    if (!pixivId)
-                        throw new Error("Couldn't find Pixiv ID for link element.")
-                    linkLoadObserver.disconnect()
-                    resolve(pixivId)
-                }
-            })
-            linkLoadObserver.observe(linkElement, { childList: true, subtree: true })
-        })
     }
 }

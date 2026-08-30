@@ -46,7 +46,7 @@ export type HostMaps = { [key in PostHost]?: SourceIdToPostIds }
 
 export type ArtworkTags = { [key in SourceId]: string }
 
-export type ThumbnailSize = "small" | "medium" | "large"
+export type ThumbnailSize = "small" | "medium" | "large" | "huge"
 
 export enum PostHost {
     Gelbooru = "gelbooru",

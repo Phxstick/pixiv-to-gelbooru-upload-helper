@@ -5,7 +5,9 @@ import ArtworkOverlay from "./artwork-overlay";
 import SettingsManager from "./settings-manager";
 import { ArtworkTags, Settings, PostHost, ThumbnailSize, GetArtworkHandler, MessageType, SourceHost, Message } from "./types";
 import { announceError, isEqual, parseDescription } from "./utility"
-import "./pixiv-script.scss"
+import "./base.scss"
+import "./nijie.scss"
+import { Nijie } from "./nijie";
 
 enum Container {
     AdjacentPics = "adjacent-pics",
@@ -13,26 +15,70 @@ enum Container {
     RelatedPics = "related-pics"
 }
 
-const thumbnailStatus = new ThumbnailStatus(SourceHost.Nijie)
+const nijieInterface = new Nijie()
+const thumbnailStatus = new ThumbnailStatus(nijieInterface)
 const artistCheck =  new ArtistCheck(SourceHost.Nijie)
 
 let currentSettings = SettingsManager.getDefaultValues();
 const settingsLoaded = browser.runtime.sendMessage({ type: "get-settings" }).then(updateSettings)
 thumbnailStatus.setHosts(currentSettings.enabledHosts as PostHost[])
 
+function handleSublists(container: HTMLElement, size: ThumbnailSize) {
+    const containers = []
+    for (const child of container.children) {
+        containers.push({ container: child as HTMLElement, size })
+    }
+    thumbnailStatus.manage(containers)
+}
+
+function handleOtherPicsByArtist() {
+    const wrappers = document.querySelectorAll("#nuitahito")
+    const picsByArtistContainer = wrappers.length > 1 ? wrappers[0] as HTMLElement : null
+    if (picsByArtistContainer) {
+        picsByArtistContainer.classList.toggle("hidden", currentSettings.hideOtherPicsByArtist)
+        if (!currentSettings.hideOtherPicsByArtist) {
+            handleSublists(picsByArtistContainer, "large")
+        }
+    }
+    const headers = document.querySelectorAll("#nuitahito_index")
+    const picsByArtistHeader = headers.length > 1 ? headers[0] as HTMLElement : null
+    if (picsByArtistHeader) {
+        picsByArtistHeader.classList.toggle("hidden", currentSettings.hideOtherPicsByArtist)
+    }
+    const adjacentPicsContainer = document.getElementById("content-menu")
+    if (adjacentPicsContainer) {
+        adjacentPicsContainer.classList.toggle("hidden", currentSettings.hideOtherPicsByArtist)
+        if (!currentSettings.hideOtherPicsByArtist) {
+            thumbnailStatus.manage([{ container: adjacentPicsContainer, size: "small" }])
+        }
+    }
+}
+
+function handleRecommendations() {
+    const wrappers = document.querySelectorAll("#nuitahito")
+    const recommendationsContainer = wrappers[wrappers.length - 1] as HTMLElement
+    const headers = document.querySelectorAll("#nuitahito_index")
+    const recommendationsHeader = headers[headers.length - 1] as HTMLElement
+
+    if (!recommendationsContainer || !recommendationsHeader) return
+    if (recommendationsContainer) {
+        recommendationsContainer.classList.toggle("hidden", currentSettings.hideRelatedPixivPics)
+        if (!currentSettings.hideRelatedPixivPics) {
+            handleSublists(recommendationsContainer, "large")
+        }
+    }
+    if (recommendationsHeader) {
+        recommendationsHeader.classList.toggle("hidden", currentSettings.hideRelatedPixivPics)
+    }
+}
+
 function applySettings(changedSettings?: Set<keyof Settings>) {
     const hasChanged = (key: keyof Settings) => !changedSettings || changedSettings.has(key)
     if (hasChanged("hideRelatedPixivPics")) {
-        const recommendationsContainer = document.getElementById("nuitahito")
-        if (recommendationsContainer) {
-            recommendationsContainer.style.display = currentSettings.hideRelatedPixivPics ? "none" : "block"
-            if (!currentSettings.hideRelatedPixivPics) {
-                for (const child of recommendationsContainer.children) {
-                    const container = child as HTMLElement
-                    thumbnailStatus.manage([{ container, size: "large" }])
-                }
-            }
-        }
+        handleRecommendations()
+    }
+    if (hasChanged("hideOtherPicsByArtist")) {
+        handleOtherPicsByArtist()
     }
     if (hasChanged("hidePixivHeader")) {
         const header = document.getElementById("header-Container")
@@ -157,32 +203,74 @@ function getArtworkCheckListener(getArtwork: GetArtworkHandler) {
 }
 const artworkCheckListenerArgs = ["click", getArtworkCheckListener(getArtwork), { capture: true }] as const
 
-
 function handleArtworkPage() {
     document.removeEventListener(...artworkCheckListenerArgs)
     document.addEventListener(...artworkCheckListenerArgs)
     ArtworkOverlay.clear()
 
+    // Make image expand further and highlight it according to upload status
+    const imgFilter = document.getElementById("img_filter") as HTMLElement | null
+    if (imgFilter) {
+        imgFilter.style.height = "100vh"
+        const image = imgFilter.querySelector("img") as HTMLElement | null
+        if (image) {
+            image.style.maxHeight = "100vh"
+            image.style.maxWidth = "unset"
+            // Don't fade out image upon hovering
+            image.style.setProperty("opacity", "1", "important")
+        }
+        thumbnailStatus.manage([{ container: imgFilter, size: "huge" }])
+        // Add a gap between the main image and its variants
+        const variantsContainer = document.getElementById("img_diff")
+        if (variantsContainer) variantsContainer.style.marginTop = "10px"
+    }
+
+    // Move title, tags and buttons below the picture (in the same order as on Pixiv)
+    const detailsContainers = document.querySelectorAll("#view-middle")
+    const lowerContainer = detailsContainers[detailsContainers.length - 1]
+    if (lowerContainer) {
+        const titleElement = document.getElementById("view-header")
+        const tagsContainer = document.getElementById("view-tag")
+        const buttonsContainer = document.getElementById("view-center-button")
+        const dateElement = document.querySelector("#view-honbun :first-child") as HTMLElement | null
+        if (titleElement) {
+            lowerContainer.prepend(titleElement)
+            titleElement.style.textAlign = "left"
+        }
+        if (buttonsContainer) lowerContainer.prepend(buttonsContainer)
+        if (tagsContainer) {
+            lowerContainer.appendChild(tagsContainer)
+            tagsContainer.style.marginBottom = "0"
+        }
+        if (dateElement) {
+            lowerContainer.appendChild(dateElement)
+            dateElement.style.textAlign = "left"
+            dateElement.style.marginLeft = "15px"
+        }
+    }
+
+    // Move adjacent pics below the image details
     const adjacentPicsContainer = document.getElementById("content-menu")
-    if (adjacentPicsContainer && !adjacentPicsContainer.id)
-        adjacentPicsContainer.id = Container.AdjacentPics
-    
-    const relatedPicsContainer = document.getElementById("nuitahito")
-    if (relatedPicsContainer && !relatedPicsContainer.id)
-        relatedPicsContainer.id = Container.RelatedPics
+    const mainContainer = document.getElementById("view-center")
+    if (mainContainer && adjacentPicsContainer) {
+        mainContainer.appendChild(adjacentPicsContainer)
+    }
+
+    // Remove comments
+    const commentBlock = document.getElementById("member_comment_block")
+    commentBlock?.remove()
+    const comments = document.querySelectorAll(".members_comment_block")
+    for (const comment of comments) {
+        comment.remove()
+    }
+
+    // Remove footer
+    document.getElementById("bottom")?.remove()
 
     settingsLoaded.then(() => {
         applySettings()
-        const containers: { container: HTMLElement, size: ThumbnailSize }[] = []
-        if (!currentSettings.hideOtherPicsByArtist) {
-            if (adjacentPicsContainer)
-                containers.push({ container: adjacentPicsContainer, size: "small" })
-        }
-        if (!currentSettings.hideRelatedPixivPics) {
-            if (relatedPicsContainer)
-                containers.push({ container: relatedPicsContainer, size: "large" })
-        }
-        thumbnailStatus.manage(containers)
+        handleOtherPicsByArtist()
+        handleRecommendations()
     })
 
     // Click containers with artist name and profile to check artist posts
@@ -190,11 +278,11 @@ function handleArtworkPage() {
 }
 
 function handleListingPage() {
-    // TODO
-    // settingsLoaded.then(() => {
-    //     applySettings()
-    //     thumbnailStatus.manage([{ container: listing, size: "large" }])
-    // })
+    settingsLoaded.then(() => {
+        applySettings()
+        const listings = [...document.querySelectorAll(".mem-index")] as HTMLElement[]
+        thumbnailStatus.manage(listings.map(container => ({ container, size: "medium" })))
+    })
 
     // Click artist name or profile picture to check artist posts
     // TODO
@@ -209,7 +297,7 @@ function main() {
     let newPageType: string | undefined
     if (url.pathname === "/view.php" || url.pathname === "/view_popup.php") {
         newPageType = "post"
-    } else if (url.pathname === "/members_illust.php") {
+    } else if (["/members.php", "/members_illust.php"].includes(url.pathname)) {
         newPageType = "listing"
     } else if (url.pathname === "/search.php") {
         newPageType = "tag"

@@ -1,0 +1,50 @@
+:not(.mem-index) > .handled {
+    &.large {
+        width: calc((100%/4) - 20px) !important;
+        padding: 8px;
+
+        &:first-child {
+            margin-left: 8px;
+        }
+        &:last-child {
+            margin-right: 8px;
+        }
+        img {
+            border-radius: 8px;
+        }
+    }
+}
+
+.checked {
+    // Required for absolute positioning of the thumbnail panel
+    position: relative;
+}
+
+.mem-index > .handled {
+    img {
+        padding: 0 !important;
+    }
+    margin: 6px !important;
+    width: 20% !important;  // Set to 18% for 5 pictures per row
+}
+
+#members_dlsite_left {
+    width: 100%;
+    margin-left: 20px;
+}
+
+a.checked, .checked :not(.thumbnail-icon) {
+    img {
+        padding: 0;
+        outline: 1px solid #eee;
+        box-shadow: 0 0 5px 4px var(--highlight-color);
+    }
+    &.large img {
+        outline: 2px solid #eee;
+        box-shadow: 0 0 10px 8px var(--highlight-color);
+    }
+    &.huge img {
+        outline: 1px solid #eee;
+        box-shadow: 0 0 12px 8px var(--highlight-color);
+    }
+}
